@@ -24,7 +24,7 @@ import { LogisticsAnimation } from './components/LogisticsAnimation.js'
 import { useConfirmation } from './components/useConfirmation.js'
 import type { ActivityEvent, BankTransaction, ChargeSuggestion, CustomsCase, CustomsStepStatus, CustomerInvoice, Department, DemoDataset, DocumentRecord, Job, OperationalAlert, OperationalMilestone, PaymentRequest, PaymentVoucher, StockMovement, SupplierCost, WarehouseActivity } from './data/model.js'
 import './App.css'
-import truckIcon from './assets/simple-blue-delivery-truck-icon-vector-60918322-Photoroom.png'
+import truckIcons from './assets/simple-blue-delivery-truck-icon-vector-60918322-Photoroom.png'
 
 type PageId =
   | 'dashboard'
@@ -634,7 +634,7 @@ function App() {
 
       <aside className={`sidebar${mobileNavOpen ? ' sidebar--open' : ''}`}>
         <div className="sidebar-brand">
-          <img src={truckIcon} alt="Truck Icon" style={{ width: 50, height: 50 }} />
+          <img src={truckIcons} alt="Truck Icon" style={{ width: 50, height: 50 }} />
 
           <span className="brand-copy">
             <span className="brand-name">SK Transworld</span>
