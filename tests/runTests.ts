@@ -1,0 +1,8 @@
+import './calculations.test.js'
+import './jobs.test.js'
+import './fleet.test.js'
+import './shipments.test.js'
+import './warehouse.test.js'
+import './documents.test.js'
+import './finance.test.js'
+import './workspaces.test.js'
