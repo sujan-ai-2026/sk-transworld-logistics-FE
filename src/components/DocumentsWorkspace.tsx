@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { DemoDataset, DocumentRecord } from '../data/model.js'
 import { createDocumentVersion, getDocumentRecords, getRequiredDocumentChecklist } from '../data/documents.js'
+import { LogisticsAnimation } from './LogisticsAnimation.js'
+import { useConfirmation } from './useConfirmation.js'
 
 const documentTypes: DocumentRecord['type'][] = [
   'commercial_invoice',
@@ -71,6 +73,7 @@ export function DocumentsWorkspace({
   onSaveDocument,
   onClassifyDocument,
 }: DocumentsWorkspaceProps) {
+  const confirm = useConfirmation()
   const [jobNo, setJobNo] = useState(initialJobNo ?? '')
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<DocumentRecord['type'] | 'all'>('all')
@@ -173,7 +176,8 @@ export function DocumentsWorkspace({
           <section className="documents-upload-card" aria-labelledby="document-upload-title">
             <div className="documents-section-heading">
               <div><span className="section-eyebrow">LOCAL DEMO ACTION</span><h3 id="document-upload-title">Add a document version</h3></div>
-              <span className="documents-classification-note">New uploads default to Internal</span>
+              <span className="documents-classification-note">New uploads default to Internal · animation is transport artwork only</span>
+              <LogisticsAnimation name="documentProcessing" width={60} height={48} />
             </div>
             <div className="documents-upload-grid">
               <label><span>Job No.</span><select value={uploadJobNo} onChange={(event) => { setUploadJobNo(event.target.value); setUploadContainerNo(''); setUploadTripId(''); setUploadInvoiceId('') }}>{dataset.jobs.map((job) => <option key={job.jobNo} value={job.jobNo}>{job.jobNo}</option>)}</select></label>
@@ -183,7 +187,13 @@ export function DocumentsWorkspace({
               <label><span>Trip (optional)</span><select value={uploadTripId} onChange={(event) => setUploadTripId(event.target.value)}><option value="">Not linked</option>{uploadTrips.map((trip) => <option key={trip.id} value={trip.id}>{trip.id}</option>)}</select></label>
               <label><span>Invoice (optional)</span><select value={uploadInvoiceId} onChange={(event) => setUploadInvoiceId(event.target.value)}><option value="">Not linked</option>{uploadInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.id}</option>)}</select></label>
             </div>
-            <div className="documents-upload-actions"><button className="button button--primary" type="button" onClick={uploadMockDocument}>Add local demo document</button>{message && <span role="status">{message}</span>}</div>
+            <div className="documents-upload-actions"><button className="button button--primary" type="button" onClick={() => void confirm({
+              title: 'Add this document record?',
+              message: `Add ${fileName.trim() || 'the selected document'} to ${uploadJobNo}?`,
+              confirmLabel: 'Add document',
+              warningIcon: true,
+              details: 'This stores demo metadata only. No file bytes are uploaded or saved to a server.',
+            }, uploadMockDocument)}>Add local demo document</button>{message && <span role="status">{message}</span>}</div>
           </section>
         </>
       )}
@@ -234,14 +244,26 @@ export function DocumentsWorkspace({
                     <td><div className="documents-row-actions">
                       <button type="button" onClick={() => setSelectedDocument(document)}>Preview</button>
                       {document.status === 'available' && <button type="button" onClick={() => downloadDemoRecord(document)}>Download demo record</button>}
-                      {!portalOnly && document.status === 'available' && <button type="button" onClick={() => onClassifyDocument(document.id, document.access === 'customer_approved' ? 'internal' : 'customer_approved')}>{document.access === 'customer_approved' ? 'Revoke sharing' : 'Approve for portal'}</button>}
+                      {!portalOnly && document.status === 'available' && <button type="button" onClick={() => {
+                        const sharing = document.access !== 'customer_approved'
+                        void confirm({
+                          title: sharing ? 'Approve document for portal sharing?' : 'Revoke customer sharing?',
+                          message: sharing
+                            ? `Make “${document.fileName ?? documentLabel(document.type)}” available in the customer portal?`
+                            : `Remove “${document.fileName ?? documentLabel(document.type)}” from customer portal visibility?`,
+                          confirmLabel: sharing ? 'Approve sharing' : 'Revoke sharing',
+                          variant: sharing ? 'warning' : 'destructive',
+                          warningIcon: true,
+                          details: 'This changes the document access classification in the local demo record.',
+                        }, () => onClassifyDocument(document.id, sharing ? 'customer_approved' : 'internal'))
+                      }}>{document.access === 'customer_approved' ? 'Revoke sharing' : 'Approve for portal'}</button>}
                     </div></td>
                   </tr>
                 )
               })}</tbody>
             </table>
           </div>
-        ) : <div className="documents-empty documents-empty--large"><strong>{query ? 'No documents match this search.' : portalOnly ? 'No customer-approved documents are available.' : 'No documents match these filters.'}</strong><span>Try another Job No., document type, status or search term.</span></div>}
+        ) : <div className="documents-empty documents-empty--large"><LogisticsAnimation name="emptyState" width={84} height={62} /><strong>{query ? 'No documents match this search.' : portalOnly ? 'No customer-approved documents are available.' : 'No documents match these filters.'}</strong><span>Try another Job No., document type, status or search term.</span></div>}
       </section>
 
       {selectedDocument && (
@@ -256,7 +278,19 @@ export function DocumentsWorkspace({
               <div><dt>Access classification</dt><dd>{documentLabel(selectedDocument.access)}</dd></div>
               <div><dt>Version history</dt><dd>{selectedDocument.history?.length ? selectedDocument.history.map((version) => `v${version.version} · ${version.fileName} · ${version.uploadedBy} · ${dateLabel(version.uploadedAt)}`).join(' | ') : 'No previous versions recorded.'}</dd></div>
             </dl>
-            {!portalOnly && selectedDocument.status === 'available' && <button className="button button--secondary" type="button" onClick={toggleSelectedDocumentSharing}>{selectedDocument.access === 'customer_approved' ? 'Revoke customer sharing' : 'Approve for customer portal'}</button>}
+            {!portalOnly && selectedDocument.status === 'available' && <button className="button button--secondary" type="button" onClick={() => {
+              const sharing = selectedDocument.access !== 'customer_approved'
+              void confirm({
+                title: sharing ? 'Approve document for portal sharing?' : 'Revoke customer sharing?',
+                message: sharing
+                  ? `Make “${selectedDocument.fileName ?? documentLabel(selectedDocument.type)}” available in the customer portal?`
+                  : `Remove “${selectedDocument.fileName ?? documentLabel(selectedDocument.type)}” from customer portal visibility?`,
+                confirmLabel: sharing ? 'Approve sharing' : 'Revoke sharing',
+                variant: sharing ? 'warning' : 'destructive',
+                warningIcon: true,
+                details: 'This changes the document access classification in the local demo record.',
+              }, toggleSelectedDocumentSharing)
+            }}>{selectedDocument.access === 'customer_approved' ? 'Revoke customer sharing' : 'Approve for customer portal'}</button>}
           </section>
         </div>
       )}

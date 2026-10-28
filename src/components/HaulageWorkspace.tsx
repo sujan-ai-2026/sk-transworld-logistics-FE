@@ -63,14 +63,14 @@ export function HaulageWorkspace({ onOpenJob }: HaulageWorkspaceProps) {
 
   return (
     <div className="haulage-workspace">
-      <div className="haulage-heading">
+      {/* <div className="haulage-heading">
         <div>
           <span className="section-eyebrow">FLEET + CARGO OPERATIONS</span>
           <h2>Haulage / Fleet</h2>
           <p>Illustrative truck, trip and cargo assignments linked through the shared Job No.</p>
         </div>
-        {/* <span className="status-badge status-badge--blue">{DEMO_DATA.metadata.label}</span> */}
-      </div>
+        <span className="status-badge status-badge--blue">{DEMO_DATA.metadata.label}</span>
+      </div> */}
 
       <section className="fleet-layout" aria-label="Fleet and cargo bay">
         <section className="fleet-main-card">

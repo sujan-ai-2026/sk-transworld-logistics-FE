@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { DemoDataset, Quotation } from '../data/model.js'
+import { LogisticsAnimation } from './LogisticsAnimation.js'
 
 type QuotationTab = 'quotations' | 'tariffs'
 
@@ -171,7 +172,7 @@ function QuotationsWorkspace({ dataset }: QuotationsWorkspaceProps) {
                 </table>
               </div>
             ) : (
-              <div className="quotation-empty"><strong>No quotations yet</strong><span>Customer quotations will appear here when available.</span></div>
+              <div className="quotation-empty"><LogisticsAnimation name="emptyState" width={76} height={56} /><strong>No quotations yet</strong><span>Customer quotations will appear here when available.</span></div>
             )}
           </section>
         </section>

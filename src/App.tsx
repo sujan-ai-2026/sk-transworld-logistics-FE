@@ -14,10 +14,14 @@ import { HaulageWorkspace } from './components/HaulageWorkspace.js'
 import { updateCustomsStep, updateShipmentMilestone, type CustomsWorkflowStep } from './data/shipments.js'
 import { WarehouseWorkspace } from './components/WarehouseWorkspace.js'
 import { DocumentsWorkspace } from './components/DocumentsWorkspace.js'
-import { FinanceWorkspace } from './components/FinanceWorkspace.js'
+import { FinanceWorkspace, type FinanceView } from './components/FinanceWorkspace.js'
 import AlertsWorkspace from './components/AlertsWorkspace.js'
 import CustomerPortal from './components/CustomerPortal.js'
 import QuotationsWorkspace from './components/QuotationsWorkspace.js'
+import MasterDataWorkspace from './components/MasterDataWorkspace.js'
+import { MainContentBackground } from './components/MainContentBackground.js'
+import { LogisticsAnimation } from './components/LogisticsAnimation.js'
+import { useConfirmation } from './components/useConfirmation.js'
 import type { ActivityEvent, BankTransaction, ChargeSuggestion, CustomsCase, CustomsStepStatus, CustomerInvoice, Department, DemoDataset, DocumentRecord, Job, OperationalAlert, OperationalMilestone, PaymentRequest, PaymentVoucher, StockMovement, SupplierCost, WarehouseActivity } from './data/model.js'
 import './App.css'
 
@@ -256,6 +260,9 @@ function BrandMark() {
 function App() {
   const [activePage, setActivePage] = useState<PageId>('dashboard')
   const [selectedJobNo, setSelectedJobNo] = useState<string | null>(null)
+  const [selectedShipmentId, setSelectedShipmentId] = useState<string | null>(null)
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
+  const [financeView, setFinanceView] = useState<FinanceView>('register')
   const [createdJobs, setCreatedJobs] = useState<Job[]>([])
   const [linkedQuotationJobs, setLinkedQuotationJobs] = useState<Record<string, string>>({})
   const [closedJobs, setClosedJobs] = useState<Record<string, { reason: string; approvedBy: string }>>({})
@@ -305,9 +312,9 @@ function App() {
         ...quotation,
         ...(linkedQuotationJobs[quotation.id]
           ? {
-              linkedJobNo: linkedQuotationJobs[quotation.id],
-              status: 'accepted' as const,
-            }
+            linkedJobNo: linkedQuotationJobs[quotation.id],
+            status: 'accepted' as const,
+          }
           : {}),
       })),
     }),
@@ -357,6 +364,7 @@ function App() {
 
   function navigateTo(page: PageId) {
     setActivePage(page)
+    if (page !== 'billing') setSelectedInvoiceId(null)
     setMobileNavOpen(false)
     setSearchOpen(false)
     setSearchValue('')
@@ -366,6 +374,17 @@ function App() {
   function openJob(jobNo: string) {
     setSelectedJobNo(jobNo)
     navigateTo('jobs')
+  }
+
+  function openShipment(shipmentId: string) {
+    setSelectedShipmentId(shipmentId)
+    navigateTo('forwarding')
+  }
+
+  function openInvoice(invoiceId: string) {
+    setSelectedInvoiceId(invoiceId)
+    setFinanceView('register')
+    navigateTo('billing')
   }
 
   function handleCreateJob(job: Job) {
@@ -624,7 +643,8 @@ function App() {
 
       <aside className={`sidebar${mobileNavOpen ? ' sidebar--open' : ''}`}>
         <div className="sidebar-brand">
-          <BrandMark />
+          <img src="/src/assets/simple-blue-delivery-truck-icon-vector-60918322-Photoroom.png" alt="Truck Icon" style={{ width: 50, height: 50 }} />
+
           <span className="brand-copy">
             <span className="brand-name">SK Transworld</span>
             <span className="brand-caption">LOGISTICS · MALAYSIA</span>
@@ -679,6 +699,7 @@ function App() {
       </aside>
 
       <div className="main-column">
+        <MainContentBackground />
         <header className="topbar">
           <div className="topbar-leading">
             <button
@@ -835,20 +856,18 @@ function App() {
                 {activePage === 'jobs' && selectedJobNo
                   ? 'Shared job detail · operations and financial status tracked separately.'
                   : activePage === 'dashboard'
-                  ? 'A connected workspace for logistics operations, finance and job follow-up.'
-                  : activePage === 'quotations'
-                  ? 'Manage customer quotations and supplier tariff visibility.'
-                  : `A shared workspace for ${activeItem?.label.toLowerCase()}, connected through one Job No.`}
+                    ? 'A connected workspace for logistics operations, finance and job follow-up.'
+                    : activePage === 'quotations'
+                      ? 'Manage customer quotations and supplier tariff visibility.'
+                      : activePage === 'master-data'
+                        ? 'Manage shared reference data for logistics operations and finance.'
+                        : `A shared workspace for ${activeItem?.label.toLowerCase()}, connected through one Job No.`}
               </p>
             </div>
-            <span className="status-badge status-badge--blue">
-              <span className="status-dot status-dot--blue" />
-              {DEMO_DATA.metadata.label}
-            </span>
           </div>
 
           {activePage === 'dashboard' ? (
-            <DashboardHome onNavigate={navigateTo} onOpenJob={openJob} />
+            <DashboardHome onNavigate={navigateTo} onOpenJob={openJob} onOpenShipment={openShipment} />
           ) : activePage === 'quotations' ? (
             <QuotationsWorkspace dataset={appDataset} />
           ) : activePage === 'jobs' ? (
@@ -859,6 +878,8 @@ function App() {
               onBackToList={() => setSelectedJobNo(null)}
               onCreateJob={handleCreateJob}
               onNavigate={navigateTo}
+              onOpenShipment={openShipment}
+              onOpenInvoice={openInvoice}
               closedJobs={closedJobs}
               onCloseJob={(jobNo, exception) =>
                 setClosedJobs((current) => ({ ...current, [jobNo]: exception ?? { reason: '', approvedBy: '' } }))
@@ -876,7 +897,14 @@ function App() {
           ) : activePage === 'forwarding' ? (
             <ForwardingWorkspace
               dataset={appDataset}
+              selectedShipmentId={selectedShipmentId ?? undefined}
+              onSelectShipment={setSelectedShipmentId}
               onOpenJob={openJob}
+              onOpenInvoice={openInvoice}
+              onOpenJobCosting={(jobNo) => {
+                setSelectedJobNo(jobNo)
+                navigateTo('job-costing')
+              }}
               onUpdateMilestone={handleUpdateMilestone}
             />
           ) : activePage === 'customs' ? (
@@ -919,7 +947,11 @@ function App() {
             <FinanceWorkspace
               dataset={appDataset}
               jobCosting={activePage === 'job-costing'}
+              financeView={financeView}
+              onFinanceViewChange={setFinanceView}
+              selectedInvoiceId={selectedInvoiceId ?? undefined}
               onOpenJob={openJob}
+              onOpenShipment={openShipment}
               onAddCharge={handleAddFinanceCharge}
               onUpdateCharge={handleUpdateFinanceCharge}
               onCreateInvoice={handleCreateFinanceInvoice}
@@ -929,16 +961,18 @@ function App() {
               onUpdateVoucher={handleUpdatePaymentVoucher}
               onUpdateBankTransaction={handleUpdateBankTransaction}
             />
+          ) : activePage === 'master-data' ? (
+            <MasterDataWorkspace dataset={appDataset} onNavigate={navigateTo} />
           ) : (
             <WorkspacePlaceholder item={activeItem} onNavigate={navigateTo} />
           )}
 
           <footer className="page-footer">
             <span>SK Transworld Logistics · Malaysia</span>
-            <span>
+            {/* <span>
               <span className="footer-dot" />
               Prototype · integrations not connected
-            </span>
+            </span> */}
           </footer>
         </main>
       </div>
@@ -967,6 +1001,8 @@ type LinkedRecord = {
   detail: string
   status?: string
   target: PageId
+  shipmentId?: string
+  invoiceId?: string
 }
 
 function JobsWorkspace({
@@ -976,6 +1012,8 @@ function JobsWorkspace({
   onBackToList,
   onCreateJob,
   onNavigate,
+  onOpenShipment,
+  onOpenInvoice,
   closedJobs,
   onCloseJob,
   onReopenJob,
@@ -986,10 +1024,13 @@ function JobsWorkspace({
   onBackToList: () => void
   onCreateJob: (job: Job) => void
   onNavigate: (page: PageId) => void
+  onOpenShipment: (shipmentId: string) => void
+  onOpenInvoice: (invoiceId: string) => void
   closedJobs: Record<string, { reason: string; approvedBy: string }>
   onCloseJob: (jobNo: string, exception?: { reason: string; approvedBy: string }) => void
   onReopenJob: (jobNo: string) => void
 }) {
+  const confirm = useConfirmation()
   const [filters, setFilters] = useState<JobFilters>(getDefaultJobFilters())
   const [createOpen, setCreateOpen] = useState(false)
   const [formErrors, setFormErrors] = useState<string[]>([])
@@ -1049,12 +1090,12 @@ function JobsWorkspace({
     : undefined
   const readiness = selectedJob
     ? getJobCloseReadiness(
-        dataset,
-        selectedJob.jobNo,
-        exceptionApproved && exceptionReason.trim() && exceptionApprover.trim()
-          ? { reason: exceptionReason, approvedBy: exceptionApprover }
-          : undefined,
-      )
+      dataset,
+      selectedJob.jobNo,
+      exceptionApproved && exceptionReason.trim() && exceptionApprover.trim()
+        ? { reason: exceptionReason, approvedBy: exceptionApprover }
+        : undefined,
+    )
     : undefined
   const exceptionForClosedJob = selectedJob ? closedJobs[selectedJob.jobNo] : undefined
   const currency = new Intl.NumberFormat('en-MY', {
@@ -1105,12 +1146,27 @@ function JobsWorkspace({
     setFormErrors(errors)
     if (errors.length > 0) return
 
+    let newJob: Job
     try {
-      const newJob = form.quotationId
+      newJob = form.quotationId
         ? acceptQuotationAndCreateJob(dataset, form).job
         : createJobFromInput(dataset, form)
-      setActiveTab('Overview')
+    } catch (error) {
+      setFormErrors([error instanceof Error ? error.message : 'Unable to create the job.'])
+      return
+    }
+
+    void confirm({
+      title: form.quotationId ? 'Convert quotation to a job?' : 'Create this job?',
+      message: form.quotationId
+        ? `Create ${newJob.jobNo} from the selected quotation and mark that quotation accepted?`
+        : `Create illustrative Job No. ${newJob.jobNo} for ${dataset.customers.find((customer) => customer.id === newJob.customerId)?.name ?? 'the selected customer'}?`,
+      confirmLabel: form.quotationId ? 'Convert to job' : 'Create job',
+      warningIcon: true,
+      details: 'This creates a local demo record. Job numbering remains illustrative and Pending Business Clarification.',
+    }, () => {
       onCreateJob(newJob)
+      setActiveTab('Overview')
       setFormErrors([])
       setCreateOpen(false)
       setForm({
@@ -1122,9 +1178,7 @@ function JobsWorkspace({
         createdDate: dataset.metadata.asOfDate,
         eta: '',
       })
-    } catch (error) {
-      setFormErrors([error instanceof Error ? error.message : 'Unable to create the job.'])
-    }
+    })
   }
 
   function toggleDepartment(department: Department) {
@@ -1145,7 +1199,11 @@ function JobsWorkspace({
             className="job-linked-record"
             key={record.id}
             type="button"
-            onClick={() => onNavigate(record.target)}
+            onClick={() => {
+              if (record.shipmentId) onOpenShipment(record.shipmentId)
+              else if (record.invoiceId) onOpenInvoice(record.invoiceId)
+              else onNavigate(record.target)
+            }}
           >
             <span className="job-linked-record-copy">
               <strong>{record.title}</strong>
@@ -1168,6 +1226,7 @@ function JobsWorkspace({
       detail: `${shipment.houseBillNo ?? 'No HBL'} / ${shipment.masterBillNo ?? 'No MBL'} · ETD ${formatDate(shipment.etd)} · ETA ${formatDate(shipment.eta)} · ${shipment.trackingSource}`,
       status: shipment.trackingSource,
       target: 'forwarding' as const,
+      shipmentId: shipment.id,
     }))
 
     switch (activeTab) {
@@ -1343,6 +1402,7 @@ function JobsWorkspace({
                 detail: `${formatDate(invoice.invoiceDate)} · due ${formatDate(invoice.dueDate)} · ${currency.format(calculateInvoiceTotals(dataset, invoice.id).subtotalRM)} · e-invoice ${label(invoice.eInvoiceStatus)}`,
                 status: invoice.status,
                 target: 'billing',
+                invoiceId: invoice.id,
               })),
               'No customer invoice is linked to this job.',
             )}
@@ -1395,6 +1455,10 @@ function JobsWorkspace({
               <span><small>Financial / billing status</small><strong>{label(selectedJob.financialStatus)}</strong></span>
             </div>
             {selectedJob.description && <p className="job-description">{selectedJob.description}</p>}
+            <div className="logistics-animation-callout job-progress-illustration">
+              <LogisticsAnimation name="truckMoving" width={126} height={66} />
+              <span className="logistics-animation-copy"><strong>Illustrative transport visual</strong><small>Demo artwork only · not live GPS or job progress</small></span>
+            </div>
             {closeReadiness && (
               <section className="job-close-panel" aria-labelledby="job-close-title">
                 <div className="job-detail-section-heading">
@@ -1427,6 +1491,7 @@ function JobsWorkspace({
                     detail: `Due ${formatDate(invoice.dueDate)} · ${currency.format(calculateInvoiceTotals(dataset, invoice.id).outstandingRM)}`,
                     status: invoice.status,
                     target: 'billing',
+                    invoiceId: invoice.id,
                   })), 'No unpaid customer invoices.')}
                 {!closedJobs[selectedJob.jobNo] && closeReadiness.blockers.some((blocker) => blocker !== 'Operational work is not marked delivered.') && (
                   <div className="job-exception-fields">
@@ -1437,18 +1502,30 @@ function JobsWorkspace({
                 )}
                 <div className="job-close-actions">
                   {closedJobs[selectedJob.jobNo] ? (
-                    <button className="button button--secondary" type="button" onClick={() => onReopenJob(selectedJob.jobNo)}>Reopen job (demo)</button>
+                    <button className="button button--secondary" type="button" onClick={() => void confirm({
+                      title: 'Reopen this job?',
+                      message: `Reopen ${selectedJob.jobNo} and return it to the active job register?`,
+                      confirmLabel: 'Reopen job',
+                      warningIcon: true,
+                    }, () => onReopenJob(selectedJob.jobNo))}>Reopen job (demo)</button>
                   ) : (
                     <button
                       className="button button--primary"
                       type="button"
                       disabled={!closeReadiness.canClose}
-                      onClick={() => onCloseJob(
+                      onClick={() => void confirm({
+                        title: 'Close this job?',
+                        message: `Close ${selectedJob.jobNo} after reviewing the displayed close-out readiness?`,
+                        confirmLabel: 'Close job',
+                        warningIcon: true,
+                        variant: 'warning',
+                        details: 'Job closure is a local demo action. Operational and financial statuses remain separate.',
+                      }, () => onCloseJob(
                         selectedJob.jobNo,
                         exceptionApproved && exceptionReason.trim() && exceptionApprover.trim()
                           ? { reason: exceptionReason.trim(), approvedBy: exceptionApprover.trim() }
                           : undefined,
-                      )}
+                      ))}
                     >
                       Close job (demo)
                     </button>
@@ -1524,7 +1601,7 @@ function JobsWorkspace({
   return (
     <div className="jobs-workspace">
       <div className="jobs-toolbar">
-        <div><span className="section-eyebrow">SHARED JOB REGISTER</span><h2>Jobs / Dockets</h2><p>Search once across Job No., customer, container, BL and vessel records.</p></div>
+        <div></div>
         <div className="jobs-toolbar-actions">
           {/* <span className="status-badge status-badge--blue">{dataset.metadata.label}</span> */}
           <button className="button button--primary" type="button" onClick={() => setCreateOpen(true)}>Create job <Icon name="arrow" size={16} /></button>
@@ -1554,20 +1631,20 @@ function JobsWorkspace({
             <th><button onClick={() => toggleSort('financialStatus')}>Billing ↕</button></th>
             <th>Documents</th>
           </tr></thead><tbody>
-            {rows.map((row) => (
-              <tr key={row.job.jobNo}>
-                <td><button className="job-number-link" type="button" onClick={() => { setActiveTab('Overview'); onOpenJob(row.job.jobNo) }}>{row.job.jobNo}</button><span className="job-table-secondary">{row.job.description}</span></td>
-                <td>{row.customerName}</td>
-                <td>{row.job.serviceDepartments.map(label).join(', ')}<span className="job-table-secondary">{row.shipmentTypes.join(', ') || 'No shipment'}</span></td>
-                <td>{row.containerNumbers.length ? row.containerNumbers.map((containerNo) => <button className="job-container-link" type="button" key={containerNo} onClick={() => { setActiveTab('Overview'); onOpenJob(row.job.jobNo) }}>{containerNo}</button>) : '—'}</td>
-                <td><span>ETA {formatDate(row.eta)}</span><span className="job-table-secondary">ETD {formatDate(row.etd)}</span></td>
-                <td>{row.job.owner}</td>
-                <td><span className={`dashboard-status dashboard-status--${row.job.operationalStatus}`}>{label(row.job.operationalStatus)}</span></td>
-                <td><span className={`dashboard-status dashboard-status--${row.job.financialStatus}`}>{label(row.job.financialStatus)}</span></td>
-                <td>{row.hasMissingDocuments ? <button className="missing-document-badge" type="button" onClick={() => { onOpenJob(row.job.jobNo); setActiveTab('Documents') }}>Missing</button> : <span className="job-document-ok">No recorded gaps</span>}</td>
-              </tr>
-            ))}
-          </tbody></table></div>
+              {rows.map((row) => (
+                <tr key={row.job.jobNo}>
+                  <td><button className="job-number-link" type="button" onClick={() => { setActiveTab('Overview'); onOpenJob(row.job.jobNo) }}>{row.job.jobNo}</button><span className="job-table-secondary">{row.job.description}</span></td>
+                  <td>{row.customerName}</td>
+                  <td>{row.job.serviceDepartments.map(label).join(', ')}<span className="job-table-secondary">{row.shipmentTypes.join(', ') || 'No shipment'}</span></td>
+                  <td>{row.containerNumbers.length ? row.containerNumbers.map((containerNo) => <button className="job-container-link" type="button" key={containerNo} onClick={() => { setActiveTab('Overview'); onOpenJob(row.job.jobNo) }}>{containerNo}</button>) : '—'}</td>
+                  <td><span>ETA {formatDate(row.eta)}</span><span className="job-table-secondary">ETD {formatDate(row.etd)}</span></td>
+                  <td>{row.job.owner}</td>
+                  <td><span className={`dashboard-status dashboard-status--${row.job.operationalStatus}`}>{label(row.job.operationalStatus)}</span></td>
+                  <td><span className={`dashboard-status dashboard-status--${row.job.financialStatus}`}>{label(row.job.financialStatus)}</span></td>
+                  <td>{row.hasMissingDocuments ? <button className="missing-document-badge" type="button" onClick={() => { onOpenJob(row.job.jobNo); setActiveTab('Documents') }}>Missing</button> : <span className="job-document-ok">No recorded gaps</span>}</td>
+                </tr>
+              ))}
+            </tbody></table></div>
         ) : <p className="job-empty job-empty--large">No jobs match your search and filters.</p>}
       </section>
 
@@ -1602,9 +1679,11 @@ function JobValue({ label, value }: { label: string; value: string }) {
 function DashboardHome({
   onNavigate,
   onOpenJob,
+  onOpenShipment,
 }: {
   onNavigate: (page: PageId) => void
   onOpenJob: (jobNo: string) => void
+  onOpenShipment: (shipmentId: string) => void
 }) {
   const defaultFilters = getDefaultDashboardFilters(DEMO_DATA)
   const [filters, setFilters] = useState<DashboardFilters>(defaultFilters)
@@ -1617,8 +1696,8 @@ function DashboardHome({
   const dateLabel = (date: string | null) =>
     date
       ? new Intl.DateTimeFormat('en-MY', { day: '2-digit', month: 'short' }).format(
-          new Date(`${date}T00:00:00`),
-        )
+        new Date(`${date}T00:00:00`),
+      )
       : '—'
   const statusLabel = (status: string) =>
     status.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
@@ -1753,6 +1832,15 @@ function DashboardHome({
         </div>
       </section>
 
+      {/* <section className="logistics-animation-callout dashboard-logistics-illustration" aria-label="Illustrative logistics activity">
+        <div className="logistics-animation-pair">
+          <LogisticsAnimation name="truckMoving" width={150} height={72} />
+        </div>
+        <span className="logistics-animation-copy"><strong>Logistics activity · illustrative</strong><small>Vehicle and cargo visuals are not live tracking or operational status indicators.</small></span>
+          <LogisticsAnimation name="containerShipping" width={110} height={72} />
+
+      </section> */}
+
       <div className="dashboard-two-column">
         <section className="dashboard-card" aria-labelledby="department-title">
           <div className="dashboard-section-heading">
@@ -1818,6 +1906,7 @@ function DashboardHome({
             <table className="dashboard-table">
               <thead>
                 <tr>
+                  <th>Shipment ID</th>
                   <th>Job No. / Customer</th>
                   <th>Container</th>
                   <th>Latest milestone</th>
@@ -1830,6 +1919,11 @@ function DashboardHome({
               <tbody>
                 {metrics.shipmentRows.map((row) => (
                   <tr key={row.containerNo}>
+                    <td>
+                      <button className="dashboard-record-link" type="button" onClick={() => onOpenShipment(row.shipmentId)}>
+                        {row.shipmentId}
+                      </button>
+                    </td>
                     <td>
                       <button className="dashboard-record-link" type="button" onClick={() => onOpenJob(row.jobNo)}>
                         {row.jobNo}

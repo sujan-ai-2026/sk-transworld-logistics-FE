@@ -11,6 +11,8 @@ import type {
   CustomsStepStatus,
   DemoDataset,
 } from '../data/model.js'
+import { LogisticsAnimation } from './LogisticsAnimation.js'
+import { useConfirmation } from './useConfirmation.js'
 
 interface CustomsWorkspaceProps {
   dataset: DemoDataset
@@ -75,6 +77,7 @@ export function CustomsWorkspace({
   onUpdateMilestone,
   onUpdateCustomsStep,
 }: CustomsWorkspaceProps) {
+  const confirm = useConfirmation()
   const [filters, setFilters] = useState(initialFilters)
   const [selectedCaseId, setSelectedCaseId] = useState(dataset.customsCases[0]?.id ?? '')
   const records = useMemo(() => getCustomsRecords(dataset, filters), [dataset, filters])
@@ -85,6 +88,34 @@ export function CustomsWorkspace({
 
   function setFilter<Key extends keyof CustomsFilters>(key: Key, value: CustomsFilters[Key]) {
     setFilters((current) => ({ ...current, [key]: value }))
+  }
+
+  function confirmMilestoneUpdate(milestoneId: string, status: 'pending' | 'in_progress' | 'completed') {
+    const milestone = dataset.milestones.find((item) => item.id === milestoneId)
+    if (!milestone) throw new Error(`Milestone not found: ${milestoneId}`)
+    void confirm({
+      title: 'Update customs milestone?',
+      message: `Change “${milestone.title}” from ${label(milestone.status)} to ${label(status)}?`,
+      confirmLabel: 'Update status',
+      warningIcon: true,
+    }, () => onUpdateMilestone(milestoneId, status))
+  }
+
+  function confirmCustomsStepUpdate(
+    customsCaseId: string,
+    step: CustomsWorkflowStep,
+    status: CustomsStepStatus | 'paid' | 'pending',
+  ) {
+    const customsCase = dataset.customsCases.find((item) => item.id === customsCaseId)
+    if (!customsCase) throw new Error(`Customs case not found: ${customsCaseId}`)
+    void confirm({
+      title: 'Update customs clearance status?',
+      message: `Change ${label(step)} for ${customsCase.jobNo} / ${customsCase.containerNo} to ${label(status)}?`,
+      confirmLabel: 'Update status',
+      warningIcon: true,
+      variant: status === 'complete' || status === 'paid' ? 'warning' : 'primary',
+      details: 'This records a local demo workflow status only; it does not lodge a customs declaration or confirm external release.',
+    }, () => onUpdateCustomsStep(customsCaseId, step, status))
   }
 
   return (
@@ -129,15 +160,15 @@ export function CustomsWorkspace({
               dataset={dataset}
               record={selectedRecord}
               onOpenJob={onOpenJob}
-              onUpdateMilestone={onUpdateMilestone}
-              onUpdateCustomsStep={onUpdateCustomsStep}
+              onUpdateMilestone={confirmMilestoneUpdate}
+              onUpdateCustomsStep={confirmCustomsStepUpdate}
             />
           ) : <p className="logistics-empty logistics-empty--detail">Select a case to review its declaration and release chain.</p>}
         </section>
       </div>
 
       <section className="customs-declaration-catalog">
-        <div><span className="section-eyebrow">DECLARATION REFERENCE</span><h3>Supported declaration categories</h3><p>Applicability depends on shipment direction, cargo and approved business/customs policy. The catalog does not assert a filing requirement for every job.</p></div>
+        <div><span className="section-eyebrow">DECLARATION REFERENCE</span><h3>Supported declaration categories</h3><p>Applicability depends on shipment direction, cargo and approved business/customs policy. The catalog does not assert a filing requirement for every job.</p><div className="logistics-animation-inline"><LogisticsAnimation name="documentProcessing" width={70} height={52} /><small>Illustrative transport artwork · no customs filing or status is represented.</small></div></div>
         <div className="customs-type-chips">{CUSTOMS_DECLARATION_TYPES.map((type) => <span key={type}>{type}{type === 'DG' ? ' · Dangerous goods' : type === 'DSO' ? ' · Delivery / shipping order' : type === 'IGM' ? ' · Import general manifest' : ''}</span>)}</div>
       </section>
       <p className="logistics-demo-note"><span className="status-dot status-dot--amber" />Demo / unconfigured · no live customs authority, carrier, payment or EDO integration. Document presence is not customs approval.</p>

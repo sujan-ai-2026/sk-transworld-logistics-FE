@@ -16,6 +16,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@lottiefiles/dotlottie-react": "0.20.0",
+    "@lottiefiles/dotlottie-web": "0.81.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

@@ -85,6 +85,8 @@ export interface Shipment {
   coLoader?: string
   vessel: string
   voyage: string
+  origin: string
+  destination: string
   etd: DateOnly | null
   eta: DateOnly | null
   masterBillNo: string | null
@@ -330,6 +332,7 @@ export interface SupplierCost {
   costType: 'actual' | 'estimated'
   approvalStatus: 'pending' | 'approved'
   paymentStatus: 'unpaid' | 'paid' | 'not_due'
+  recordedDate: DateOnly
   supplierInvoiceRef?: string
   financeReviewedBy?: string
   financeReviewedAt?: DateOnly
@@ -394,6 +397,24 @@ export interface BankTransaction {
   direction: 'inflow' | 'outflow'
   matchedRecordId: string | null
   reconciliationStatus: 'unmatched' | 'matched' | 'reconciled'
+}
+
+export interface LedgerAccount {
+  id: string
+  code: string
+  name: string
+  type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
+  subtype: 'cash' | 'receivable' | 'inventory' | 'other_asset' | 'payable' | 'loan' | 'tax' | 'capital' | 'revenue' | 'direct_cost' | 'operating_expense'
+}
+
+export interface OpeningBalance {
+  id: string
+  accountId: string
+  asOfDate: DateOnly
+  debitRM: number
+  creditRM: number
+  illustrative: true
+  assumption: string
 }
 
 export type AlertType =
@@ -461,6 +482,7 @@ export interface DemoDataset {
   invoices: CustomerInvoice[]
   paymentVouchers: PaymentVoucher[]
   bankTransactions: BankTransaction[]
+  openingBalances: OpeningBalance[]
   alerts: OperationalAlert[]
   activity: ActivityEvent[]
 }

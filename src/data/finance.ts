@@ -216,6 +216,7 @@ export function getProfitabilityByDepartment(dataset: DemoDataset): FinanceAggre
 
 export function getProfitabilityByShipment(dataset: DemoDataset): FinanceAggregate[] {
   return dataset.shipments.map((shipment) => {
+    const shipmentsOnJob = dataset.shipments.filter((record) => record.jobNo === shipment.jobNo)
     const shipmentContainers = dataset.containers.filter((container) => container.shipmentId === shipment.id)
     const containerNumbers = new Set(shipmentContainers.map((container) => container.containerNo))
     const tripIds = new Set(dataset.trips
@@ -241,7 +242,8 @@ export function getProfitabilityByShipment(dataset: DemoDataset): FinanceAggrega
           [...receiptIds].some((receiptId) => charge.sourceEventId === receiptId || charge.sourceEventId.startsWith(`storage:${receiptId}:`))),
     )
     const relatedCosts = dataset.supplierCosts.filter(
-      (cost) => cost.jobNo === shipment.jobNo && (!cost.tripId || tripIds.has(cost.tripId)),
+      (cost) => cost.jobNo === shipment.jobNo &&
+        (cost.tripId ? tripIds.has(cost.tripId) : shipmentsOnJob.length === 1),
     )
     const revenueRM = roundRM(charges.reduce((total, charge) => total + charge.amountRM, 0))
     const actualCostRM = roundRM(relatedCosts.filter((cost) => cost.costType === 'actual').reduce((total, cost) => total + cost.amountRM, 0))
@@ -267,7 +269,7 @@ export function getReceivablesRM(dataset: DemoDataset): number {
 
 export function getPayablesRM(dataset: DemoDataset): number {
   return roundRM(dataset.supplierCosts
-    .filter((cost) => cost.costType === 'actual' && cost.paymentStatus === 'unpaid')
+    .filter((cost) => cost.costType === 'actual' && cost.approvalStatus === 'approved' && cost.paymentStatus === 'unpaid')
     .reduce((total, cost) => total + cost.amountRM, 0))
 }
 

@@ -13,6 +13,8 @@ import type {
   StockMovement,
   WarehouseActivity,
 } from '../data/model.js'
+import { LogisticsAnimation } from './LogisticsAnimation.js'
+import { useConfirmation } from './useConfirmation.js'
 
 interface WarehouseWorkspaceProps {
   dataset: DemoDataset
@@ -57,6 +59,7 @@ export function WarehouseWorkspace({
   onCreateStorageCharge,
   onUpdateStorageCharge,
 }: WarehouseWorkspaceProps) {
+  const confirm = useConfirmation()
   const [tab, setTab] = useState<WarehouseTab>('inventory')
   const [query, setQuery] = useState('')
   const [selectedReceiptId, setSelectedReceiptId] = useState(dataset.warehouseReceipts[0]?.id ?? '')
@@ -159,6 +162,7 @@ export function WarehouseWorkspace({
   function handleAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedReceipt) return
+    const form = event.currentTarget
     const formData = new FormData(event.currentTarget)
     try {
       const movement = createStockAdjustment({
@@ -177,9 +181,18 @@ export function WarehouseWorkspace({
         batchLot: String(formData.get('batchLot') ?? ''),
         expiryDate: String(formData.get('expiryDate') ?? '') || undefined,
       })
-      onAddStockAdjustment(movement)
-      setAdjustmentOpen(false)
-      event.currentTarget.reset()
+      void confirm({
+        title: 'Append this stock adjustment?',
+        message: `Add a ${movement.quantity} ${movement.unit} ${movement.discrepancyType} adjustment to ${movement.sku}?`,
+        confirmLabel: 'Append adjustment',
+        variant: 'warning',
+        warningIcon: true,
+        details: 'This adds a separate stock ledger entry; existing movements will not be overwritten.',
+      }, () => {
+        onAddStockAdjustment(movement)
+        setAdjustmentOpen(false)
+        form.reset()
+      })
     } catch (error) {
       setAdjustmentError(error instanceof Error ? error.message : 'Unable to record the stock adjustment.')
     }
@@ -187,25 +200,21 @@ export function WarehouseWorkspace({
 
   function addStorageCharge() {
     if (!preview) return
-    try {
-      const amountRM = storageAdjustmentAmount === ''
-        ? undefined
-        : Number(storageAdjustmentAmount)
-      const charge = createStorageChargeSuggestion(
-        preview,
-        dataset.charges,
-        {
-          ...(amountRM === undefined ? {} : { amountRM }),
-          ...(storageAdjustmentReason ? { reason: storageAdjustmentReason } : {}),
-        },
-      )
-      onCreateStorageCharge(charge)
-      setStorageError('')
-      setStorageAdjustmentAmount('')
-      setStorageAdjustmentReason('')
-    } catch (error) {
-      setStorageError(error instanceof Error ? error.message : 'Unable to create the storage charge.')
-    }
+    const amountRM = storageAdjustmentAmount === ''
+      ? undefined
+      : Number(storageAdjustmentAmount)
+    const charge = createStorageChargeSuggestion(
+      preview,
+      dataset.charges,
+      {
+        ...(amountRM === undefined ? {} : { amountRM }),
+        ...(storageAdjustmentReason ? { reason: storageAdjustmentReason } : {}),
+      },
+    )
+    onCreateStorageCharge(charge)
+    setStorageError('')
+    setStorageAdjustmentAmount('')
+    setStorageAdjustmentReason('')
   }
 
   return (
@@ -331,11 +340,11 @@ function InventoryWorkspace({
 
             <div className="warehouse-inbound-outbound-grid">
               <section className="logistics-subsection">
-                <div className="logistics-subsection-heading"><div><h4>Inbound · receiving to put-away</h4><small>Record actual handling progress; updates remain local to the demo.</small></div><span>{activities.filter((activity) => ['receiving', 'unloading', 'palletisation', 'labelling', 'storage'].includes(activity.type)).length}</span></div>
+                <div className="logistics-subsection-heading"><div><h4>Inbound · receiving to put-away</h4><small>Illustrative transport visual; activity status below is local demo data.</small></div><LogisticsAnimation name="truckUnloading" width={64} height={48} /><span>{activities.filter((activity) => ['receiving', 'unloading', 'palletisation', 'labelling', 'storage'].includes(activity.type)).length}</span></div>
                 <ActivityList activities={activities.filter((activity) => ['receiving', 'unloading', 'palletisation', 'labelling', 'storage'].includes(activity.type))} onUpdate={onUpdateActivity} owner={selectedJob.owner} />
               </section>
               <section className="logistics-subsection">
-                <div className="logistics-subsection-heading"><div><h4>Outbound · pick, pack & dispatch</h4><small>Dispatch and POD remain separate recorded activities.</small></div><span>{activities.filter((activity) => ['handling', 'picking', 'packing', 'loading', 'dispatch', 'delivery', 'pod'].includes(activity.type)).length}</span></div>
+                <div className="logistics-subsection-heading"><div><h4>Outbound · pick, pack & dispatch</h4><small>Illustrative transport visual; dispatch and POD remain separate demo activities.</small></div><LogisticsAnimation name="truckLoading" width={64} height={48} /><span>{activities.filter((activity) => ['handling', 'picking', 'packing', 'loading', 'dispatch', 'delivery', 'pod'].includes(activity.type)).length}</span></div>
                 <ActivityList activities={activities.filter((activity) => ['handling', 'picking', 'packing', 'loading', 'dispatch', 'delivery', 'pod'].includes(activity.type))} onUpdate={onUpdateActivity} owner={selectedJob.owner} />
               </section>
             </div>
@@ -362,7 +371,16 @@ function InventoryWorkspace({
 }
 
 function ActivityList({ activities, onUpdate, owner }: { activities: WarehouseActivity[]; onUpdate: WarehouseWorkspaceProps['onUpdateActivity']; owner: string }) {
-  return activities.length ? <ol className="warehouse-activity-list">{activities.map((activity) => <li className={`warehouse-activity warehouse-activity--${activity.status}`} key={activity.id}><span className="warehouse-activity-dot" /><span className="warehouse-activity-copy"><strong>{label(activity.type)}</strong><small>{label(activity.status)} · {formatDate(activity.scheduledDate)} · Owner: {owner}</small></span>{activity.status !== 'completed' && <select aria-label={`Update ${label(activity.type)} status`} onChange={(event) => onUpdate(activity.id, event.target.value as WarehouseActivity['status'])} value={activity.status}><option value="planned">Planned</option><option value="in_progress">In progress</option><option value="completed">Completed</option></select>}</li>)}</ol> : <p className="logistics-empty">No activity records in this workflow stage.</p>
+  const confirm = useConfirmation()
+  return activities.length ? <ol className="warehouse-activity-list">{activities.map((activity) => <li className={`warehouse-activity warehouse-activity--${activity.status}`} key={activity.id}><span className="warehouse-activity-dot" /><span className="warehouse-activity-copy"><strong>{label(activity.type)}</strong><small>{label(activity.status)} · {formatDate(activity.scheduledDate)} · Owner: {owner}</small></span>{activity.status !== 'completed' && <select aria-label={`Update ${label(activity.type)} status`} onChange={(event) => {
+    const status = event.target.value as WarehouseActivity['status']
+    void confirm({
+      title: 'Update warehouse activity?',
+      message: `Change ${label(activity.type)} from ${label(activity.status)} to ${label(status)}?`,
+      confirmLabel: 'Update status',
+      warningIcon: true,
+    }, () => onUpdate(activity.id, status))
+  }} value={activity.status}><option value="planned">Planned</option><option value="in_progress">In progress</option><option value="completed">Completed</option></select>}</li>)}</ol> : <p className="logistics-empty">No activity records in this workflow stage.</p>
 }
 
 function StockAdjustmentForm({
@@ -442,6 +460,7 @@ function StorageWorkspace({
   storageError: string
   updatePolicy: <Key extends keyof StorageBillingPolicy>(key: Key, value: StorageBillingPolicy[Key]) => void
 }) {
+  const confirm = useConfirmation()
   return (
     <div className="warehouse-storage-layout">
       <section className="warehouse-storage-card">
@@ -472,7 +491,14 @@ function StorageWorkspace({
             </div>
             {storageError && <p className="warehouse-form-error" role="alert">{storageError}</p>}
             {storageChargeExists && <p className="warehouse-duplicate-warning" role="status">A charge for this receipt and billing period already exists. Duplicate generation is blocked.</p>}
-            <div className="warehouse-storage-actions"><button className="job-primary-button" disabled={storageChargeExists || preview.chargeablePeriods <= 0} onClick={onAddCharge} type="button">Create draft charge suggestion</button>{preview.chargeablePeriods <= 0 && <span>No chargeable period remains after free days.</span>}</div>
+            <div className="warehouse-storage-actions"><button className="job-primary-button" disabled={storageChargeExists || preview.chargeablePeriods <= 0} onClick={() => void confirm({
+              title: 'Create a storage charge suggestion?',
+              message: `Add a local draft charge for ${receipt.grnNo} in ${selectedJob.jobNo}?`,
+              confirmLabel: 'Create draft charge',
+              warningIcon: true,
+              variant: 'warning',
+              details: `Illustrative amount: ${money(storageAdjustmentAmount === '' ? preview.amountRM : Number(storageAdjustmentAmount), policy.decimalPlaces)}. Storage rate and billing policy remain pending confirmation.`,
+            }, onAddCharge)} type="button">Create draft charge suggestion</button>{preview.chargeablePeriods <= 0 && <span>No chargeable period remains after free days.</span>}</div>
           </>
         ) : <p className="logistics-empty logistics-empty--detail">{selectedRate ? 'Select a warehouse receipt to preview storage billing.' : 'No customer-specific storage rule exists for this receipt customer.'}</p>}
       </section>
@@ -490,7 +516,7 @@ function StorageWorkspace({
         <div className="logistics-card-heading"><div><span className="section-eyebrow">CHARGE SUGGESTIONS</span><h3>Storage billing register</h3></div><span>{charges.length} records</span></div>
         {charges.length ? <div className="warehouse-table-wrap"><table className="warehouse-table"><thead><tr><th>Job / source period</th><th>Charge explanation</th><th>Amount</th><th>Adjustment</th><th>Approval</th></tr></thead><tbody>{charges.map((charge) => {
           const job = dataset.jobs.find((record) => record.jobNo === charge.jobNo)
-          return <tr key={charge.id}><td><button className="warehouse-job-link" onClick={() => onOpenJob(charge.jobNo)} type="button">{charge.jobNo}</button><small>{charge.sourceEventId.split(':').slice(-2).join(' → ')}</small></td><td>{charge.description}</td><td>{money(charge.amountRM, 2)}</td><td>{charge.adjustmentReason ?? 'No adjustment'}</td><td><span className={`warehouse-approval warehouse-approval--${charge.status}`}>{label(charge.status)}</span>{charge.status === 'draft' && <button className="warehouse-approve-button" onClick={() => onUpdateCharge(charge.id, 'approved')} type="button">Approve</button>}{job && <small>Owner: {job.owner}</small>}</td></tr>
+          return <tr key={charge.id}><td><button className="warehouse-job-link" onClick={() => onOpenJob(charge.jobNo)} type="button">{charge.jobNo}</button><small>{charge.sourceEventId.split(':').slice(-2).join(' → ')}</small></td><td>{charge.description}</td><td>{money(charge.amountRM, 2)}</td><td>{charge.adjustmentReason ?? 'No adjustment'}</td><td><span className={`warehouse-approval warehouse-approval--${charge.status}`}>{label(charge.status)}</span>{charge.status === 'draft' && <button className="warehouse-approve-button" onClick={() => void confirm({ title: 'Approve this storage charge?', message: `Approve ${money(charge.amountRM, 2)} for ${charge.jobNo}?`, confirmLabel: 'Approve charge', variant: 'warning', warningIcon: true }, () => onUpdateCharge(charge.id, 'approved'))} type="button">Approve</button>}{job && <small>Owner: {job.owner}</small>}</td></tr>
         })}</tbody></table></div> : <p className="logistics-empty">No storage charge suggestions have been generated.</p>}
       </section>
     </div>

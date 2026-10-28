@@ -515,6 +515,7 @@ export function validateDemoData(dataset: DemoDataset): DataIntegrityResult {
   }
 
   const shipments = indexById(dataset.shipments, 'shipments')
+  indexById(dataset.openingBalances, 'openingBalances')
   indexById(dataset.containers, 'containers')
   const containersByNumber = new Map(dataset.containers.map((container) => [container.containerNo, container]))
   const trips = indexById(dataset.trips, 'trips')
@@ -714,6 +715,16 @@ export function validateDemoData(dataset: DemoDataset): DataIntegrityResult {
       errors.push(`Bank transaction ${transaction.id} is marked matched without a matched record`)
     }
   }
-
+  const openingDebit = dataset.openingBalances.reduce((total, opening) => total + opening.debitRM, 0)
+  const openingCredit = dataset.openingBalances.reduce((total, opening) => total + opening.creditRM, 0)
+  if (roundRM(openingDebit) !== roundRM(openingCredit)) {
+    errors.push('Opening balances do not balance (debits must equal credits)')
+  }
+  for (const opening of dataset.openingBalances) {
+    requireReference(
+      ['1000', '1100', '1200', '1900', '2000', '2100', '2200', '3000'].includes(opening.accountId),
+      `Opening balance ${opening.id} references unknown account ${opening.accountId}`,
+    )
+  }
   return { valid: errors.length === 0, errors }
 }

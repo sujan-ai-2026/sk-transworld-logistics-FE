@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { getAlertAgeLabel } from '../data/alerts.js'
+import { LogisticsAnimation } from './LogisticsAnimation.js'
+import { useConfirmation } from './useConfirmation.js'
 import type { DemoDataset, OperationalAlert } from '../data/model.js'
 
 type AlertStatusFilter = 'all' | OperationalAlert['status']
@@ -29,6 +31,7 @@ function dateLabel(date: string | null): string {
 }
 
 function AlertsWorkspace({ dataset, onUpdateAlert, onOpenJob, onNavigate }: AlertsWorkspaceProps) {
+  const confirm = useConfirmation()
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<AlertStatusFilter>('all')
   const [severityFilter, setSeverityFilter] = useState<OperationalAlert['severity'] | 'all'>('all')
@@ -146,22 +149,50 @@ function AlertsWorkspace({ dataset, onUpdateAlert, onOpenJob, onNavigate }: Aler
               <div className="alert-card-controls">
                 <div className="alert-control-fields">
                   <label><span>Owner / assignee</span><select value={alert.owner} onChange={(event) => update(alert, { owner: event.target.value })}>{!owners.includes(alert.owner) && <option value={alert.owner}>{alert.owner}</option>}{owners.map((owner) => <option key={owner} value={owner}>{owner}</option>)}</select></label>
-                  <label><span>Next action</span><input value={alert.nextAction} onChange={(event) => update(alert, { nextAction: event.target.value })} /></label>
+                  <label><span>Next action / follow-up</span><input value={alert.nextAction} onChange={(event) => update(alert, { nextAction: event.target.value })} /></label>
                 </div>
-                <div className="alert-next-action"><strong>Follow-up:</strong> {alert.nextAction || 'Add a next action.'}</div>
                 {alert.notes && alert.notes.length > 0 && <ul className="alert-notes">{alert.notes.map((note, index) => <li key={`${alert.id}-note-${index}`}>{note}</li>)}</ul>}
-                <div className="alert-note-entry"><label><span>Add note</span><input value={noteDrafts[alert.id] ?? ''} onChange={(event) => setNoteDrafts((current) => ({ ...current, [alert.id]: event.target.value }))} placeholder="Record a follow-up note" /></label><button type="button" disabled={!noteDrafts[alert.id]?.trim()} onClick={() => { const note = noteDrafts[alert.id]?.trim(); if (!note) return; update(alert, { notes: [...(alert.notes ?? []), `${dataset.metadata.asOfDate} · ${note}`] }); setNoteDrafts((current) => ({ ...current, [alert.id]: '' })) }}>Add note</button></div>
+                <div className="alert-note-entry"><label><span>Add note</span><input value={noteDrafts[alert.id] ?? ''} onChange={(event) => setNoteDrafts((current) => ({ ...current, [alert.id]: event.target.value }))} placeholder="Record a follow-up note" /></label><button type="button" disabled={!noteDrafts[alert.id]?.trim()} onClick={() => {
+                  const note = noteDrafts[alert.id]?.trim()
+                  if (!note) return
+                  void confirm({
+                    title: 'Add this alert note?',
+                    message: `Append the note to “${alert.title}” in the local activity history?`,
+                    confirmLabel: 'Add note',
+                    details: note,
+                  }, () => {
+                    update(alert, { notes: [...(alert.notes ?? []), `${dataset.metadata.asOfDate} · ${note}`] })
+                    setNoteDrafts((current) => ({ ...current, [alert.id]: '' }))
+                  })
+                }}>Add note</button></div>
                 <div className="alert-actions">
-                  {alert.status === 'open' && <button type="button" onClick={() => update(alert, { status: 'acknowledged', acknowledgedAt: dataset.metadata.asOfDate, acknowledgedBy: 'Demo workspace user' })}>Acknowledge</button>}
-                  {alert.status !== 'resolved' && <button type="button" onClick={() => update(alert, { escalationCount: alert.escalationCount + 1 })}>Escalate ({alert.escalationCount})</button>}
-                  {alert.status !== 'resolved' && <button className="alert-resolve-button" type="button" onClick={() => update(alert, { status: 'resolved', resolvedAt: dataset.metadata.asOfDate })}>Resolve</button>}
+                  {alert.status === 'open' && <button type="button" onClick={() => void confirm({
+                    title: 'Acknowledge this alert?',
+                    message: `Assign ${alert.title} to ${alert.owner} and record it as acknowledged?`,
+                    confirmLabel: 'Acknowledge',
+                    variant: 'warning',
+                  }, () => update(alert, { status: 'acknowledged', acknowledgedAt: dataset.metadata.asOfDate, acknowledgedBy: 'Demo workspace user' }))}>Acknowledge</button>}
+                  {alert.status !== 'resolved' && <button type="button" onClick={() => void confirm({
+                    title: 'Escalate this alert?',
+                    message: `Record an escalation for “${alert.title}”?`,
+                    confirmLabel: 'Escalate',
+                    variant: 'warning',
+                    warningIcon: true,
+                    details: 'This updates the local demo escalation count; no external notification is sent.',
+                  }, () => update(alert, { escalationCount: alert.escalationCount + 1 }))}>Escalate ({alert.escalationCount})</button>}
+                  {alert.status !== 'resolved' && <button className="alert-resolve-button" type="button" onClick={() => void confirm({
+                    title: 'Resolve this alert?',
+                    message: `Mark “${alert.title}” as resolved?`,
+                    confirmLabel: 'Resolve alert',
+                    variant: 'warning',
+                  }, () => update(alert, { status: 'resolved', resolvedAt: dataset.metadata.asOfDate }))}>Resolve</button>}
                   {alert.status === 'resolved' && <span className="alert-escalation-count">Resolved · {alert.escalationCount} escalation{alert.escalationCount === 1 ? '' : 's'}</span>}
                   {destination && <button type="button" onClick={() => onNavigate(destination)}>Open {destination === 'documents' ? 'documents' : destination}</button>}
                 </div>
               </div>
             </article>
           )
-        }) : <div className="alerts-empty"><strong>No alerts match these filters.</strong><span>Change the search, severity, or status filter to review other records.</span></div>}
+        }) : <div className="alerts-empty"><LogisticsAnimation name="emptyState" width={76} height={56} /><strong>No alerts match these filters.</strong><span>Change the search, severity, or status filter to review other records.</span></div>}
       </section>
     </div>
   )

@@ -30,6 +30,7 @@
 html {
   min-width: 320px;
   min-height: 100%;
+  overflow-x: clip;
   background: var(--canvas);
   scroll-behavior: smooth;
 }

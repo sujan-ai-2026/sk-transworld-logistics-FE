@@ -1,12 +1,17 @@
-import { getFreeDaysRemaining } from './calculations.js'
+import { calculateInvoiceTotals, getFreeDaysRemaining } from './calculations.js'
+import { getProfitabilityByShipment } from './finance.js'
 import type {
+  Container,
+  CustomerInvoice,
   CustomsCase,
   CustomsDeclarationType,
   CustomsStepStatus,
   DateOnly,
   DemoDataset,
+  Job,
   OperationalMilestone,
   Shipment,
+  SupplierCost,
 } from './model.js'
 
 export type ShipmentStatusFilter = 'all' | 'booked' | 'in_transit' | 'at_port' | 'in_warehouse' | 'delivered'
@@ -64,6 +69,8 @@ export function getForwardingRecords(
       shipment.coLoader,
       shipment.vessel,
       shipment.voyage,
+      shipment.origin,
+      shipment.destination,
       shipment.masterBillNo,
       shipment.houseBillNo,
       ...containers.map((container) => container.containerNo),
@@ -259,5 +266,115 @@ export function updateShipmentMilestone(
     status,
     occurredAt: updatedAt,
     source: 'manual',
+  }
+}
+
+export type DerivedShipmentStatus = Container['status'] | 'unknown'
+
+export interface ShipmentDetailRecord {
+  shipment: Shipment
+  job: Job | null
+  customerName: string | null
+  carrierName: string | null
+  containers: Container[]
+  milestones: OperationalMilestone[]
+  status: DerivedShipmentStatus
+  invoices: Array<{ invoice: CustomerInvoice; outstandingRM: number; subtotalRM: number }>
+  supplierCosts: SupplierCost[]
+  profitability: ReturnType<typeof getProfitabilityByShipment>[number] | null
+}
+
+function shipmentSourceIds(dataset: DemoDataset, shipment: Shipment): {
+  containerNumbers: Set<string>
+  tripIds: Set<string>
+  milestoneIds: Set<string>
+  customsIds: Set<string>
+  receiptIds: Set<string>
+} {
+  const shipmentContainers = dataset.containers.filter((container) => container.shipmentId === shipment.id)
+  const containerNumbers = new Set(shipmentContainers.map((container) => container.containerNo))
+  const tripIds = new Set(dataset.trips
+    .filter((trip) => trip.jobNo === shipment.jobNo && containerNumbers.has(trip.containerNo))
+    .map((trip) => trip.id))
+  const milestoneIds = new Set(dataset.milestones
+    .filter((milestone) => milestone.jobNo === shipment.jobNo && (!milestone.containerNo || containerNumbers.has(milestone.containerNo)))
+    .map((milestone) => milestone.id))
+  const customsIds = new Set(dataset.customsCases
+    .filter((customsCase) => customsCase.jobNo === shipment.jobNo && containerNumbers.has(customsCase.containerNo))
+    .map((customsCase) => customsCase.id))
+  const receiptIds = new Set(dataset.warehouseReceipts
+    .filter((receipt) => receipt.jobNo === shipment.jobNo && containerNumbers.has(receipt.containerNo))
+    .map((receipt) => receipt.id))
+  return { containerNumbers, tripIds, milestoneIds, customsIds, receiptIds }
+}
+
+function chargeBelongsToShipment(
+  chargeSourceEventId: string,
+  shipment: Shipment,
+  sources: ReturnType<typeof shipmentSourceIds>,
+): boolean {
+  return chargeSourceEventId === shipment.id ||
+    sources.tripIds.has(chargeSourceEventId) ||
+    sources.milestoneIds.has(chargeSourceEventId) ||
+    sources.customsIds.has(chargeSourceEventId) ||
+    [...sources.receiptIds].some((receiptId) =>
+      chargeSourceEventId === receiptId || chargeSourceEventId.startsWith(`storage:${receiptId}:`),
+    )
+}
+
+export function deriveShipmentStatus(containers: Container[]): DerivedShipmentStatus {
+  if (!containers.length) return 'unknown'
+  if (containers.every((container) => container.status === 'delivered')) return 'delivered'
+  if (containers.some((container) => container.status === 'in_warehouse')) return 'in_warehouse'
+  if (containers.some((container) => container.status === 'at_port')) return 'at_port'
+  if (containers.some((container) => container.status === 'in_transit')) return 'in_transit'
+  return 'booked'
+}
+
+export function getShipmentById(dataset: DemoDataset, shipmentId: string): Shipment | undefined {
+  return dataset.shipments.find((shipment) => shipment.id === shipmentId)
+}
+
+export function getShipmentDetail(dataset: DemoDataset, shipmentId: string): ShipmentDetailRecord | null {
+  const shipment = getShipmentById(dataset, shipmentId)
+  if (!shipment) return null
+  const job = dataset.jobs.find((record) => record.jobNo === shipment.jobNo) ?? null
+  const shipmentsOnJob = dataset.shipments.filter((record) => record.jobNo === shipment.jobNo)
+  const customer = job ? dataset.customers.find((record) => record.id === job.customerId) : undefined
+  const carrier = dataset.suppliers.find((record) => record.id === shipment.carrierId)
+  const containers = dataset.containers.filter((container) => container.shipmentId === shipment.id)
+  const sources = shipmentSourceIds(dataset, shipment)
+  const milestones = dataset.milestones
+    .filter((milestone) =>
+      milestone.jobNo === shipment.jobNo &&
+      (!milestone.containerNo || sources.containerNumbers.has(milestone.containerNo)),
+    )
+    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+  const invoices = dataset.invoices.flatMap((invoice) => {
+    if (invoice.jobNo !== shipment.jobNo) return []
+    const attributed = invoice.chargeIds.some((chargeId) => {
+      const charge = dataset.charges.find((record) => record.id === chargeId)
+      return charge ? chargeBelongsToShipment(charge.sourceEventId, shipment, sources) : false
+    })
+    if (!attributed && shipmentsOnJob.length !== 1) return []
+    const totals = calculateInvoiceTotals(dataset, invoice.id)
+    return [{ invoice, outstandingRM: totals.outstandingRM, subtotalRM: totals.subtotalRM }]
+  })
+  const supplierCosts = dataset.supplierCosts.filter((cost) =>
+    cost.jobNo === shipment.jobNo &&
+      (cost.tripId ? sources.tripIds.has(cost.tripId) : shipmentsOnJob.length === 1),
+  )
+  const profitability = getProfitabilityByShipment(dataset).find((row) => row.id === shipment.id) ?? null
+  return {
+    shipment,
+    job,
+    customerName: customer?.name ?? null,
+    carrierName: carrier?.name ?? null,
+    containers,
+    milestones,
+    status: deriveShipmentStatus(containers),
+    invoices,
+    supplierCosts,
+    profitability,
   }
 }

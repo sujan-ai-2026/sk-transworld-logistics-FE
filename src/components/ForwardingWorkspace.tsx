@@ -1,10 +1,22 @@
 import { useMemo, useState } from 'react'
-import { getContainerFreeTime, getForwardingRecords, type ForwardingFilters } from '../data/shipments.js'
+import { formatMYR } from '../data/statements.js'
+import {
+  getContainerFreeTime,
+  getForwardingRecords,
+  getShipmentDetail,
+  type ForwardingFilters,
+} from '../data/shipments.js'
 import type { DemoDataset, OperationalMilestone } from '../data/model.js'
+import { LogisticsAnimation } from './LogisticsAnimation.js'
+import { useConfirmation } from './useConfirmation.js'
 
 interface ForwardingWorkspaceProps {
   dataset: DemoDataset
+  selectedShipmentId?: string
+  onSelectShipment?: (shipmentId: string) => void
   onOpenJob: (jobNo: string) => void
+  onOpenInvoice?: (invoiceId: string) => void
+  onOpenJobCosting?: (jobNo: string) => void
   onUpdateMilestone: (milestoneId: string, status: OperationalMilestone['status']) => void
 }
 
@@ -38,24 +50,35 @@ function sourceLabel(source: OperationalMilestone['source']): string {
 
 export function ForwardingWorkspace({
   dataset,
+  selectedShipmentId,
+  onSelectShipment,
   onOpenJob,
+  onOpenInvoice,
+  onOpenJobCosting,
   onUpdateMilestone,
 }: ForwardingWorkspaceProps) {
+  const confirm = useConfirmation()
   const [tab, setTab] = useState<ForwardingTab>('shipments')
   const [filters, setFilters] = useState(initialFilters)
-  const [selectedShipmentId, setSelectedShipmentId] = useState(dataset.shipments[0]?.id ?? '')
+  const [internalShipmentId, setInternalShipmentId] = useState(selectedShipmentId ?? dataset.shipments[0]?.id ?? '')
   const [selectedContainerNo, setSelectedContainerNo] = useState(dataset.containers[0]?.containerNo ?? '')
+  const activeShipmentId = selectedShipmentId ?? internalShipmentId
+
   const records = useMemo(() => getForwardingRecords(dataset, filters), [dataset, filters])
   const filteredContainers = records.flatMap(({ shipment, containers }) =>
     containers.map((container) => ({ shipment, container })),
   )
-  const selectedRecord =
-    records.find(({ shipment }) => shipment.id === selectedShipmentId) ?? records[0]
-  const selectedContainerRecord =
-    filteredContainers.find(({ container }) => container.containerNo === selectedContainerNo) ??
-    filteredContainers[0]
+  const selectedDetail = activeShipmentId ? getShipmentDetail(dataset, activeShipmentId) : null
+  const selectedRecord = records.find(({ shipment }) => shipment.id === activeShipmentId)
+  const selectedContainerRecord = filteredContainers.find(({ container }) => container.containerNo === selectedContainerNo)
+  const shipmentLookupState = !activeShipmentId
+    ? 'empty'
+    : selectedDetail
+      ? 'ready'
+      : 'not_found'
+  const hiddenByFilters = Boolean(selectedDetail && tab === 'shipments' && !selectedRecord)
   const activeJobNo = tab === 'shipments'
-    ? selectedRecord?.shipment.jobNo
+    ? selectedDetail?.shipment.jobNo
     : selectedContainerRecord?.container.jobNo
   const milestones = activeJobNo
     ? dataset.milestones
@@ -73,6 +96,24 @@ export function ForwardingWorkspace({
 
   function setFilter<Key extends keyof ForwardingFilters>(key: Key, value: ForwardingFilters[Key]) {
     setFilters((current) => ({ ...current, [key]: value }))
+  }
+
+  function selectShipment(shipmentId: string) {
+    setInternalShipmentId(shipmentId)
+    onSelectShipment?.(shipmentId)
+    setTab('shipments')
+  }
+
+  function confirmMilestoneUpdate(milestoneId: string, status: OperationalMilestone['status']) {
+    const milestone = dataset.milestones.find((item) => item.id === milestoneId)
+    if (!milestone) throw new Error(`Milestone not found: ${milestoneId}`)
+    void confirm({
+      title: 'Update forwarding milestone?',
+      message: `Change “${milestone.title}” from ${label(milestone.status)} to ${label(status)}?`,
+      confirmLabel: 'Update status',
+      warningIcon: true,
+      details: 'This records a local demo milestone. No carrier tracking or external event is generated.',
+    }, () => onUpdateMilestone(milestoneId, status))
   }
 
   return (
@@ -116,21 +157,52 @@ export function ForwardingWorkspace({
           </div>
           {tab === 'shipments' ? (
             records.length ? (
-              <div className="logistics-list">
-                {records.map(({ shipment, customerName, containers }) => (
-                  <button
-                    aria-pressed={selectedRecord?.shipment.id === shipment.id}
-                    className={`logistics-record-option${selectedRecord?.shipment.id === shipment.id ? ' logistics-record-option--active' : ''}`}
-                    key={shipment.id}
-                    onClick={() => setSelectedShipmentId(shipment.id)}
-                    type="button"
-                  >
-                    <span className="logistics-record-main">
-                      <strong>{shipment.jobNo}</strong><small>{customerName}</small><small>{shipment.vessel} · {shipment.voyage}</small>
-                    </span>
-                    <span className="logistics-record-aside"><b>{containers.length} {containers.length === 1 ? 'container' : 'containers'}</b><small>{label(shipment.mode)} · {label(shipment.movement)}</small><small>ETA {formatDate(shipment.eta)}</small></span>
-                  </button>
-                ))}
+              <div className="logistics-table-wrap">
+                <table className="logistics-register-table">
+                  <thead>
+                    <tr>
+                      <th>Shipment ID</th>
+                      <th>Job No.</th>
+                      <th>Customer</th>
+                      <th>Origin / destination</th>
+                      <th>Status</th>
+                      <th>ETA</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map(({ shipment, job, customerName, containers }) => {
+                      const detail = getShipmentDetail(dataset, shipment.id)
+                      const selected = activeShipmentId === shipment.id
+                      return (
+                        <tr
+                          className={selected ? 'logistics-register-row logistics-register-row--active' : 'logistics-register-row'}
+                          key={shipment.id}
+                        >
+                          <td>
+                            <button
+                              className="shipment-id-link"
+                              type="button"
+                              aria-current={selected ? 'true' : undefined}
+                              onClick={() => selectShipment(shipment.id)}
+                            >
+                              {shipment.id}
+                            </button>
+                          </td>
+                          <td>
+                            <button className="finance-inline-link" type="button" onClick={() => onOpenJob(job.jobNo)}>{job.jobNo}</button>
+                          </td>
+                          <td>{customerName}</td>
+                          <td>{shipment.origin} → {shipment.destination}</td>
+                          <td>{label(detail?.status ?? 'unknown')}</td>
+                          <td>
+                            {formatDate(shipment.eta)}
+                            <small>{containers.length} {containers.length === 1 ? 'container' : 'containers'}</small>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             ) : <p className="logistics-empty">No shipments match the search and filters.</p>
           ) : (
@@ -157,13 +229,20 @@ export function ForwardingWorkspace({
         </section>
 
         <section className="logistics-detail-card" aria-label="Selected shipment details">
-          {tab === 'shipments' && selectedRecord ? (
+          {tab === 'shipments' && shipmentLookupState === 'empty' ? (
+            <p className="logistics-empty logistics-empty--detail">Select a Shipment ID to view the corresponding record.</p>
+          ) : tab === 'shipments' && shipmentLookupState === 'not_found' ? (
+            <p className="logistics-empty logistics-empty--detail" role="alert">Shipment ID {activeShipmentId} was not found in the shared shipment register.</p>
+          ) : tab === 'shipments' && selectedDetail ? (
             <ShipmentDetail
               dataset={dataset}
-              record={selectedRecord}
+              detail={selectedDetail}
+              hiddenByFilters={hiddenByFilters}
               milestones={milestones}
               onOpenJob={onOpenJob}
-              onUpdateMilestone={onUpdateMilestone}
+              onOpenInvoice={onOpenInvoice}
+              onOpenJobCosting={onOpenJobCosting}
+              onUpdateMilestone={confirmMilestoneUpdate}
             />
           ) : tab === 'containers' && selectedContainerRecord ? (
             <ContainerDetail
@@ -171,9 +250,11 @@ export function ForwardingWorkspace({
               record={selectedContainerRecord}
               milestones={milestones}
               onOpenJob={onOpenJob}
-              onUpdateMilestone={onUpdateMilestone}
+              onUpdateMilestone={confirmMilestoneUpdate}
             />
-          ) : <p className="logistics-empty logistics-empty--detail">Select a record to see details and its milestone history.</p>}
+          ) : tab === 'containers' ? (
+            <p className="logistics-empty logistics-empty--detail">Select a container to see details and its milestone history.</p>
+          ) : <p className="logistics-empty logistics-empty--detail">Select a Shipment ID to view the corresponding record.</p>}
         </section>
       </div>
       <p className="logistics-demo-note"><span className="status-dot status-dot--amber" />Demo snapshot · tracking source is displayed per shipment; no live carrier connection is configured.</p>
@@ -185,30 +266,54 @@ type ForwardingRecord = ReturnType<typeof getForwardingRecords>[number]
 
 function ShipmentDetail({
   dataset,
-  record,
+  detail,
+  hiddenByFilters,
   milestones,
   onOpenJob,
+  onOpenInvoice,
+  onOpenJobCosting,
   onUpdateMilestone,
 }: {
   dataset: DemoDataset
-  record: ForwardingRecord
+  detail: NonNullable<ReturnType<typeof getShipmentDetail>>
+  hiddenByFilters: boolean
   milestones: OperationalMilestone[]
   onOpenJob: ForwardingWorkspaceProps['onOpenJob']
+  onOpenInvoice: ForwardingWorkspaceProps['onOpenInvoice']
+  onOpenJobCosting: ForwardingWorkspaceProps['onOpenJobCosting']
   onUpdateMilestone: ForwardingWorkspaceProps['onUpdateMilestone']
 }) {
-  const { shipment, job, carrierName, customerName, containers } = record
-  const relatedDocuments = dataset.documents.filter((document) => document.jobNo === job.jobNo)
+  const { shipment, job, carrierName, customerName, containers, invoices, supplierCosts, profitability } = detail
+  const relatedDocuments = job
+    ? dataset.documents.filter((document) => document.jobNo === job.jobNo)
+    : []
 
   return (
     <>
-      <DetailHeading eyebrow="SHIPMENT DETAIL" title={shipment.id} status={label(shipment.trackingSource)} onOpenJob={() => onOpenJob(job.jobNo)} jobNo={job.jobNo} />
+      <DetailHeading
+        eyebrow="SHIPMENT DETAIL"
+        title={shipment.id}
+        status={label(detail.status)}
+        onOpenJob={job ? () => onOpenJob(job.jobNo) : undefined}
+        jobNo={job?.jobNo ?? 'Not linked'}
+      />
+      {hiddenByFilters && <p className="finance-message" role="status">This Shipment ID is still open by unique ID. It is hidden from the filtered register list.</p>}
+      {!job && <p className="logistics-empty" role="alert">The linked Job No. could not be found.</p>}
+      <div className="logistics-animation-callout">
+        <LogisticsAnimation name="containerShipping" width={116} height={68} />
+        <span className="logistics-animation-copy"><strong>Illustrative transport animation</strong><small>Artwork is a truck scene, not a vessel or carrier position.</small></span>
+      </div>
       <div className="logistics-detail-grid">
-        <DetailFact label="Customer" value={customerName} />
-        <DetailFact label="Carrier" value={carrierName} />
+        <DetailFact label="Customer" value={customerName ?? 'Not linked'} />
+        <DetailFact label="Linked Job No." value={job?.jobNo ?? 'Not linked'} />
+        <DetailFact label="Origin" value={shipment.origin} />
+        <DetailFact label="Destination" value={shipment.destination} />
+        <DetailFact label="Service type" value={`${shipment.mode} · ${label(shipment.movement)}`} />
+        <DetailFact label="Carrier" value={carrierName ?? 'Not linked'} />
         <DetailFact label="Co-loader" value={shipment.coLoader ?? 'Not recorded'} />
         <DetailFact label="Vessel / voyage" value={`${shipment.vessel} · ${shipment.voyage}`} />
         <DetailFact label="ETD / ETA" value={`${formatDate(shipment.etd)} / ${formatDate(shipment.eta)}`} />
-        <DetailFact label="Mode / movement" value={`${shipment.mode} · ${label(shipment.movement)}`} />
+        <DetailFact label="Shipment status" value={label(detail.status)} />
         <DetailFact label="MBL" value={shipment.masterBillNo ?? 'Not recorded'} />
         <DetailFact label="HBL" value={shipment.houseBillNo ?? 'Not recorded'} />
         <DetailFact label="Tracking source" value={label(shipment.trackingSource)} />
@@ -221,14 +326,53 @@ function ShipmentDetail({
           return <div className="logistics-container-chip" key={container.id}><strong>{container.containerNo}</strong><span>{container.sizeType} · {label(container.status)}</span><small>{container.freeDaysAllowed === null ? 'Free days not recorded' : `${container.freeDaysAllowed} free days allowed`}{freeTime.remainingDays !== null ? ` · ${freeTime.remainingDays} remaining` : ''}</small></div>
         })}</div> : <p className="logistics-empty">No container records are linked to this shipment.</p>}
       </section>
-      <MilestoneHistory
-        dataset={dataset}
-        documents={relatedDocuments}
-        job={job}
-        milestones={milestones}
-        onOpenJob={onOpenJob}
-        onUpdateMilestone={onUpdateMilestone}
-      />
+      <section className="logistics-subsection">
+        <div className="logistics-subsection-heading"><h4>Linked invoices</h4><span>{invoices.length}</span></div>
+        {invoices.length ? invoices.map(({ invoice, subtotalRM, outstandingRM }) => (
+          <div className="finance-source-line" key={invoice.id}>
+            <span>
+              <strong>{invoice.id}</strong>
+              <small>{label(invoice.status)} · {formatMYR(subtotalRM)} · outstanding {formatMYR(outstandingRM)}</small>
+            </span>
+            {onOpenInvoice
+              ? <button className="finance-link-button" type="button" onClick={() => onOpenInvoice(invoice.id)}>View invoice</button>
+              : <span>Linked</span>}
+          </div>
+        )) : <p className="logistics-empty">Not linked</p>}
+      </section>
+      <section className="logistics-subsection">
+        <div className="logistics-subsection-heading"><h4>Recorded supplier costs</h4><span>{supplierCosts.length}</span></div>
+        {supplierCosts.length ? supplierCosts.map((cost) => (
+          <div className="finance-source-line" key={cost.id}>
+            <span><strong>{cost.description}</strong><small>{cost.id} · {label(cost.costType)} · {label(cost.paymentStatus)}</small></span>
+            <b>{formatMYR(cost.amountRM)}</b>
+          </div>
+        )) : <p className="logistics-empty">Not linked</p>}
+      </section>
+      <section className="logistics-subsection">
+        <div className="logistics-subsection-heading"><h4>Job profitability</h4><span>{profitability ? 'Linked' : 'Not linked'}</span></div>
+        {profitability ? (
+          <div className="finance-source-line">
+            <span>
+              <strong>{profitability.label}</strong>
+              <small>Performed charges less actual supplier costs for this shipment ID</small>
+            </span>
+            {job && onOpenJobCosting
+              ? <button className="finance-link-button" type="button" onClick={() => onOpenJobCosting(job.jobNo)}>Open job costing</button>
+              : <b>{formatMYR(profitability.grossProfitRM)}</b>}
+          </div>
+        ) : <p className="logistics-empty">Not linked</p>}
+      </section>
+      {job ? (
+        <MilestoneHistory
+          dataset={dataset}
+          documents={relatedDocuments}
+          job={job}
+          milestones={milestones}
+          onOpenJob={onOpenJob}
+          onUpdateMilestone={onUpdateMilestone}
+        />
+      ) : <p className="logistics-empty">Milestone history is unavailable without a linked Job No.</p>}
     </>
   )
 }
@@ -284,11 +428,11 @@ function ContainerDetail({
   )
 }
 
-function DetailHeading({ eyebrow, title, status, jobNo, onOpenJob }: { eyebrow: string; title: string; status: string; jobNo: string; onOpenJob: () => void }) {
+function DetailHeading({ eyebrow, title, status, jobNo, onOpenJob }: { eyebrow: string; title: string; status: string; jobNo: string; onOpenJob?: () => void }) {
   return (
     <div className="logistics-detail-heading">
       <div><span className="section-eyebrow">{eyebrow}</span><h3>{title}</h3><span className="logistics-detail-job">{jobNo}</span></div>
-      <div className="logistics-detail-actions"><span className="logistics-source-badge">{status}</span><button className="dashboard-text-link" onClick={onOpenJob} type="button">Open Job →</button></div>
+      <div className="logistics-detail-actions"><span className="logistics-source-badge">{status}</span>{onOpenJob ? <button className="dashboard-text-link" onClick={onOpenJob} type="button">Open Job →</button> : <span className="logistics-source-badge">Not linked</span>}</div>
     </div>
   )
 }
