@@ -246,16 +246,6 @@ function Icon({
   )
 }
 
-function BrandMark() {
-  return (
-    <span className="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 34 34" fill="none">
-        <path d="M7.5 9h19v4H7.5zM10 15h16.5v4H10zM7.5 21h19v4H7.5z" fill="currentColor" />
-        <path d="M23 21h3.5v4H23z" fill="#EFB54A" />
-      </svg>
-    </span>
-  )
-}
 
 function App() {
   const [activePage, setActivePage] = useState<PageId>('dashboard')
