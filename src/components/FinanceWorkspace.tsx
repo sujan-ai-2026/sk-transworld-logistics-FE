@@ -30,6 +30,7 @@ import { FinanceStatements } from './FinanceStatements.js'
 import { useConfirmation } from './useConfirmation.js'
 
 type CostingView = 'job' | 'customer' | 'shipment' | 'department'
+type BillingTab = 'register' | 'suggestions' | 'charges' | 'approvals' | 'posting' | 'exceptions'
 export type FinanceView = 'register' | 'pnl' | 'balance_sheet'
 
 interface FinanceWorkspaceProps {
@@ -39,6 +40,7 @@ interface FinanceWorkspaceProps {
   onFinanceViewChange?: (view: FinanceView) => void
   selectedInvoiceId?: string
   onOpenJob: (jobNo: string) => void
+  onOpenInvoice: (invoiceId: string) => void
   onOpenShipment?: (shipmentId: string) => void
   onAddCharge: (charge: ChargeSuggestion) => void
   onUpdateCharge: (charge: ChargeSuggestion) => void
@@ -68,6 +70,7 @@ function FinanceWorkspace({
   onFinanceViewChange,
   selectedInvoiceId,
   onOpenJob,
+  onOpenInvoice,
   onOpenShipment,
   onAddCharge,
   onUpdateCharge,
@@ -87,11 +90,13 @@ function FinanceWorkspace({
   const [cancelReason, setCancelReason] = useState('')
   const [message, setMessage] = useState('')
   const [bankMatches, setBankMatches] = useState<Record<string, string>>({})
+  const [billingTab, setBillingTab] = useState<BillingTab>('register')
   const candidates = useMemo(() => getOperationalChargeCandidates(dataset), [dataset])
   const search = query.trim().toLowerCase()
 
   useEffect(() => {
     if (jobCosting || financeView !== 'register' || !selectedInvoiceId) return
+    setBillingTab('register')
     document.getElementById(`finance-invoice-${selectedInvoiceId}`)?.scrollIntoView({
       block: 'center',
       behavior: 'smooth',
@@ -327,13 +332,37 @@ function FinanceWorkspace({
           <Summary label="Finance review queue" value={String(pendingCostCount + dataset.charges.filter((charge) => charge.status === 'draft').length)} caption="Supplier costs + draft charges" />
         </section>
 
-        <section className="finance-card">
+        <div className="finance-billing-tabs" role="tablist" aria-label="Billing register workflow">
+          {([
+            ['register', 'Billing Register', dataset.invoices.length],
+            ['suggestions', 'Draft Suggestions', candidates.length],
+            ['charges', 'Charges', dataset.charges.length],
+            ['approvals', 'Approvals', pendingCostCount + dataset.paymentRequests.filter((request) => request.status === 'submitted').length],
+            ['posting', 'Posting Status', dataset.paymentVouchers.length + dataset.bankTransactions.length],
+            ['exceptions', 'Exceptions', dataset.charges.filter((charge) => !dataset.jobs.some((job) => job.jobNo === charge.jobNo) || !charge.sourceEventId).length],
+          ] as const).map(([id, title, count]) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={billingTab === id}
+              aria-controls="billing-tab-panel"
+              className={billingTab === id ? 'finance-billing-tab finance-billing-tab--active' : 'finance-billing-tab'}
+              key={id}
+              onClick={() => setBillingTab(id)}
+            >
+              {title}<span>{count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div id="billing-tab-panel" className={`finance-billing-panel finance-billing-panel--${billingTab}`} role="tabpanel">
+        <section className="finance-card finance-billing-section finance-billing-section--suggestions">
           <div className="finance-card-heading"><div><span className="section-eyebrow">OPERATIONAL EVENT → BILLING</span><h3>Draft charge suggestions</h3><p>Review and approve before invoice creation. Rates are illustrative and sourced from linked quotations.</p></div><button className="button button--primary" type="button" onClick={() => confirmAction('Create draft charge suggestions?', `Create ${candidates.length} reviewable draft charge suggestions from rated operational events?`, 'Create suggestions', addAllSuggestions, 'warning')}>Create rated draft suggestions ({candidates.length})</button></div>
           {message && <p className="finance-message" role="status">{message}</p>}
           {candidates.length ? <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Job / department</th><th>Source event / description</th><th>Quantity / rate</th><th>Draft amount</th><th>Action</th></tr></thead><tbody>{candidates.map((candidate) => <tr key={candidate.sourceEventId}><td><strong>{candidate.jobNo}</strong><small>{label(candidate.department)}</small></td><td><strong>{candidate.description}</strong><small>{candidate.sourceEventId} · source event complete</small></td><td>{candidate.quantity} {candidate.unit}<small>{currency.format(candidate.amountRM / candidate.quantity)} / {candidate.unit} · quotation rate</small></td><td>{currency.format(candidate.amountRM)}</td><td><button className="finance-link-button" type="button" onClick={() => confirmAction('Add this draft charge?', `Create a draft suggestion for ${candidate.sourceEventId}?`, 'Add draft', () => handleCreateSuggestion(candidate), 'warning')}>Add draft</button></td></tr>)}</tbody></table></div> : <p className="finance-empty">No additional rated events are ready. Unrated events are not given invented prices; existing suggestions and storage charges remain available below.</p>}
         </section>
 
-        <section className="finance-card">
+        <section className="finance-card finance-billing-section finance-billing-section--charges">
           <div className="finance-card-heading"><div><span className="section-eyebrow">CHARGE REGISTER</span><h3>Charges, approvals and posting state</h3></div><label className="finance-search"><span>Search finance lines</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Job No., customer, source event, charge…" /></label></div>
           <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Charge / Job</th><th>Source / evidence</th><th>Department</th><th>Qty / unit</th><th>Amount</th><th>Approval / posting</th><th>Action</th></tr></thead><tbody>{chargeRows.map((charge) => {
             const job = dataset.jobs.find((record) => record.jobNo === charge.jobNo)
@@ -343,24 +372,24 @@ function FinanceWorkspace({
           {!chargeRows.length && <p className="finance-empty">No charges match this search.</p>}
         </section>
 
-        <section className="finance-card">
+        <section className="finance-card finance-billing-section finance-billing-section--approvals">
           <div className="finance-card-heading"><div><span className="section-eyebrow">FINANCE REVIEW</span><h3>Supplier costs and payment requests</h3></div></div>
           <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Supplier cost / Job</th><th>Cost type / category</th><th>Amount</th><th>Approval / payment</th><th>Action</th></tr></thead><tbody>{dataset.supplierCosts.filter((cost) => !search || `${cost.id} ${cost.jobNo} ${cost.description} ${cost.supplierInvoiceRef ?? ''}`.toLowerCase().includes(search)).map((cost) => <tr key={cost.id}><td><strong>{cost.description}</strong><small>{cost.id} · <button className="finance-inline-link" type="button" onClick={() => onOpenJob(cost.jobNo)}>{cost.jobNo}</button> · {dataset.suppliers.find((supplier) => supplier.id === cost.supplierId)?.name}</small></td><td>{label(cost.costType)} · {label(cost.category)}{cost.tripId && <small>Source trip {cost.tripId}</small>}</td><td>{currency.format(cost.amountRM)}</td><td><span className={`finance-state finance-state--${cost.approvalStatus}`}>{label(cost.approvalStatus)}</span><small>{label(cost.paymentStatus)} · {cost.supplierInvoiceRef ?? 'No supplier invoice ref'}</small></td><td>{cost.approvalStatus === 'pending' && <button className="finance-row-button" type="button" onClick={() => confirmAction('Approve this supplier cost?', `Approve ${cost.description} for ${currency.format(cost.amountRM)}?`, 'Approve cost', () => onUpdateSupplierCost({ ...cost, approvalStatus: 'approved', financeReviewedBy: 'Finance reviewer (demo)', financeReviewedAt: dataset.metadata.asOfDate }))}>Approve cost</button>}</td></tr>)}</tbody></table></div>
           <div className="finance-subsection-heading"><h4>Reimbursement / payment requests</h4><span>Requests retain their own approval state</span></div>
           <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Request / Job</th><th>Type / supplier</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>{dataset.paymentRequests.map((request) => <tr key={request.id}><td><strong>{request.description}</strong><small>{request.id} · <button className="finance-inline-link" type="button" onClick={() => onOpenJob(request.jobNo)}>{request.jobNo}</button></small></td><td>{label(request.requestType)}<small>{dataset.suppliers.find((supplier) => supplier.id === request.supplierId)?.name}</small></td><td>{currency.format(request.amountRM)}</td><td><span className={`finance-state finance-state--${request.status}`}>{label(request.status)}</span></td><td>{request.status === 'submitted' && <button className="finance-row-button" type="button" onClick={() => confirmAction('Approve this payment request?', `Approve ${request.description} for ${currency.format(request.amountRM)}?`, 'Approve request', () => onUpdatePaymentRequest({ ...request, status: 'approved' }))}>Approve</button>}{request.status === 'approved' && <button className="finance-row-button" type="button" onClick={() => confirmAction('Mark this payment request paid?', `Record ${request.description} as paid in the local demo?`, 'Mark paid', () => onUpdatePaymentRequest({ ...request, status: 'paid' }), 'warning')}>Mark paid (demo)</button>}</td></tr>)}</tbody></table></div>
         </section>
 
-        <section className="finance-card">
+        <section className="finance-card finance-billing-section finance-billing-section--register">
           <div className="finance-card-heading"><div><span className="section-eyebrow">CUSTOMER BILLING</span><h3>Invoices · Finance approval · e-invoice</h3></div><span className="finance-integration-badge">LHDN MyInvois / email demo only</span></div>
           <div className="finance-invoice-create"><label>Job with approved performed charges<select value={selectedJobNo} onChange={(event) => setSelectedJobNo(event.target.value)}><option value="">Select Job No.</option>{dataset.jobs.map((job) => <option key={job.jobNo} value={job.jobNo}>{job.jobNo} · {job.description}</option>)}</select></label><button className="button button--secondary" type="button" onClick={() => selectedJobNo && confirmAction('Create a draft invoice?', `Create an invoice from approved performed charges for ${selectedJobNo}?`, 'Create draft invoice', () => createInvoice(selectedJobNo), 'warning')}>Create draft invoice from approved charges</button></div>
           <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Invoice / Job</th><th>Customer / dates</th><th>Amount / outstanding</th><th>Finance / e-invoice / email</th><th>Action</th></tr></thead><tbody>{dataset.invoices.map((invoice) => {
             const totals = calculateInvoiceTotals(dataset, invoice.id)
             const customer = dataset.customers.find((record) => record.id === invoice.customerId)
-            return <tr id={`finance-invoice-${invoice.id}`} className={selectedInvoiceId === invoice.id ? 'finance-selected-invoice' : undefined} key={invoice.id}><td><strong>{invoice.id}</strong><small><button className="finance-inline-link" type="button" onClick={() => onOpenJob(invoice.jobNo)}>{invoice.jobNo}</button> · {invoice.chargeIds.length} linked charge(s)</small></td><td>{customer?.name ?? 'Unknown customer'}<small>{invoice.invoiceDate} · due {invoice.dueDate}</small></td><td>{currency.format(totals.subtotalRM)}<small>Paid {currency.format(totals.paidRM)} · Open {invoice.status === 'cancelled' ? currency.format(0) : currency.format(totals.outstandingRM)}</small></td><td><span className={`finance-state finance-state--${invoice.status}`}>{label(invoice.status)}</span><small>e-Invoice: {label(invoice.eInvoiceStatus)}{invoice.eInvoiceReference ? ` · ${invoice.eInvoiceReference}` : ''}</small><small>Email: {label(invoice.emailStatus)}{invoice.eInvoiceError ? ` · ${invoice.eInvoiceError}` : ''}</small></td><td><div className="finance-row-actions">{invoice.status === 'draft' && <button type="button" onClick={() => confirmAction('Approve this invoice?', `Approve invoice ${invoice.id} for Finance review?`, 'Approve invoice', () => onUpdateInvoice({ ...invoice, status: 'approved', financeApprovedBy: 'Finance reviewer (demo)' }))}>Finance approve</button>}{invoice.status === 'approved' && <button type="button" onClick={() => confirmAction('Submit demo e-invoice?', `Record a demo submission state for invoice ${invoice.id}?`, 'Submit demo invoice', () => submitDemoInvoice(invoice), 'warning')}>Submit e-invoice demo</button>}{['approved', 'demo_submitted'].includes(invoice.status) && invoice.emailStatus === 'not_sent' && <button type="button" onClick={() => confirmAction('Record demo email status?', `Set invoice ${invoice.id} to demo email sent? No email will actually be sent.`, 'Record demo status', () => recordDemoEmail(invoice))}>Record email demo</button>}{!['paid', 'cancelled'].includes(invoice.status) && invoice.amountPaidRM === 0 && <button type="button" onClick={() => { setCancelTarget({ kind: 'invoice', id: invoice.id }); setCancelReason('') }}>Cancel / reverse</button>}{invoice.amountPaidRM > 0 && invoice.status !== 'cancelled' && <small>Payment recorded; separate credit / refund workflow required.</small>}</div>{invoice.cancellationReason && <small>Reversal reason: {invoice.cancellationReason}</small>}</td></tr>
+            return <tr id={`finance-invoice-${invoice.id}`} className={selectedInvoiceId === invoice.id ? 'finance-selected-invoice' : undefined} key={invoice.id}><td><button className="finance-invoice-link" type="button" onClick={() => onOpenInvoice(invoice.id)}>{invoice.id}</button><small><button className="finance-inline-link" type="button" onClick={() => onOpenJob(invoice.jobNo)}>{invoice.jobNo}</button> · {invoice.chargeIds.length} linked charge(s)</small></td><td>{customer?.name ?? 'Unknown customer'}<small>{invoice.invoiceDate} · due {invoice.dueDate}</small></td><td>{currency.format(totals.subtotalRM)}<small>Paid {currency.format(totals.paidRM)} · Open {invoice.status === 'cancelled' ? currency.format(0) : currency.format(totals.outstandingRM)}</small></td><td><span className={`finance-state finance-state--${invoice.status}`}>{label(invoice.status)}</span><small>e-Invoice: {label(invoice.eInvoiceStatus)}{invoice.eInvoiceReference ? ` · ${invoice.eInvoiceReference}` : ''}</small><small>Email: {label(invoice.emailStatus)}{invoice.eInvoiceError ? ` · ${invoice.eInvoiceError}` : ''}</small></td><td><div className="finance-row-actions">{invoice.status === 'draft' && <button type="button" onClick={() => confirmAction('Approve this invoice?', `Approve invoice ${invoice.id} for Finance review?`, 'Approve invoice', () => onUpdateInvoice({ ...invoice, status: 'approved', financeApprovedBy: 'Finance reviewer (demo)' }))}>Finance approve</button>}{invoice.status === 'approved' && <button type="button" onClick={() => confirmAction('Submit demo e-invoice?', `Record a demo submission state for invoice ${invoice.id}?`, 'Submit demo invoice', () => submitDemoInvoice(invoice), 'warning')}>Submit e-invoice demo</button>}{['approved', 'demo_submitted'].includes(invoice.status) && invoice.emailStatus === 'not_sent' && <button type="button" onClick={() => confirmAction('Record demo email status?', `Set invoice ${invoice.id} to demo email sent? No email will actually be sent.`, 'Record demo status', () => recordDemoEmail(invoice))}>Record email demo</button>}{!['paid', 'cancelled'].includes(invoice.status) && invoice.amountPaidRM === 0 && <button type="button" onClick={() => { setCancelTarget({ kind: 'invoice', id: invoice.id }); setCancelReason('') }}>Cancel / reverse</button>}{invoice.amountPaidRM > 0 && invoice.status !== 'cancelled' && <small>Payment recorded; separate credit / refund workflow required.</small>}</div>{invoice.cancellationReason && <small>Reversal reason: {invoice.cancellationReason}</small>}</td></tr>
           })}</tbody></table></div>
         </section>
 
-        <section className="finance-card">
+        <section className="finance-card finance-billing-section finance-billing-section--posting">
           <div className="finance-card-heading"><div><span className="section-eyebrow">PAYABLES + BANK RECONCILIATION</span><h3>Vouchers and bank feed records</h3></div><span className="finance-integration-badge">Bank feed not connected</span></div>
           <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Voucher</th><th>Supplier / Job</th><th>Amount / date</th><th>Status</th><th>Action</th></tr></thead><tbody>{dataset.paymentVouchers.map((voucher) => {
             const reconciled = dataset.bankTransactions.some((transaction) => transaction.matchedRecordId === voucher.id && transaction.reconciliationStatus === 'reconciled')
@@ -369,8 +398,64 @@ function FinanceWorkspace({
           <div className="finance-subsection-heading"><h4>Bank reconciliation register</h4><span>Demo feed rows · no bank connection</span></div>
           <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Transaction</th><th>Direction</th><th>Amount</th><th>Match / status</th><th>Action</th></tr></thead><tbody>{dataset.bankTransactions.map((transaction) => <tr key={transaction.id}><td><strong>{transaction.description}</strong><small>{transaction.id} · {transaction.transactionDate}</small></td><td>{label(transaction.direction)}</td><td>{currency.format(transaction.amountRM)}</td><td>{transaction.matchedRecordId ?? 'No match'}<small>{label(transaction.reconciliationStatus)}</small></td><td>{transaction.reconciliationStatus !== 'reconciled' && <div className="finance-row-actions"><select aria-label={`Match bank transaction ${transaction.id}`} value={bankMatches[transaction.id] ?? transaction.matchedRecordId ?? ''} onChange={(event) => setBankMatches((current) => ({ ...current, [transaction.id]: event.target.value }))}><option value="">Select finance record</option>{dataset.invoices.filter((invoice) => invoice.status !== 'cancelled').map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.id}</option>)}{dataset.paymentVouchers.filter((voucher) => voucher.status !== 'cancelled').map((voucher) => <option key={voucher.id} value={voucher.id}>{voucher.id}</option>)}</select><button type="button" onClick={() => confirmAction('Match this bank transaction?', `Match ${transaction.description} to the selected finance record?`, 'Match transaction', () => { const updated = matchBankTransaction(transaction, bankMatches[transaction.id] ?? transaction.matchedRecordId ?? '', dataset); onUpdateBankTransaction(updated) }, 'warning')}>Match</button>{transaction.reconciliationStatus === 'matched' && <button type="button" onClick={() => confirmAction('Reconcile this transaction?', `Finalize reconciliation of ${transaction.description}?`, 'Reconcile', () => onUpdateBankTransaction(reconcileBankTransaction(transaction)), 'warning')}>Reconcile</button>}</div>}</td></tr>)}</tbody></table></div>
         </section>
+        <section className="finance-card finance-billing-section finance-billing-section--exceptions">
+          <div className="finance-card-heading"><div><span className="section-eyebrow">BILLING CONTROLS</span><h3>Exceptions and data quality</h3><p>Only issues detected in the shared demo records are shown. No posting is marked successful without a source status.</p></div></div>
+          {(() => {
+            const exceptions = [
+              ...dataset.charges.filter((charge) => !dataset.jobs.some((job) => job.jobNo === charge.jobNo)).map((charge) => ({ id: charge.id, title: 'Charge references missing Job No.', detail: `${charge.jobNo} · ${charge.description}`, tone: 'overdue' })),
+              ...dataset.charges.filter((charge) => !charge.sourceEventId).map((charge) => ({ id: `${charge.id}-source`, title: 'Charge is missing source evidence.', detail: charge.description, tone: 'pending' })),
+              ...dataset.invoices.filter((invoice) => invoice.chargeIds.some((chargeId) => !dataset.charges.some((charge) => charge.id === chargeId))).map((invoice) => ({ id: `${invoice.id}-charge`, title: 'Invoice references a missing charge.', detail: invoice.id, tone: 'overdue' })),
+              ...dataset.bankTransactions.filter((transaction) => transaction.reconciliationStatus === 'unmatched').map((transaction) => ({ id: transaction.id, title: 'Bank transaction is unmatched.', detail: transaction.description, tone: 'pending' })),
+            ]
+            return exceptions.length ? <div className="finance-exception-list">{exceptions.map((exception) => <div className="finance-exception-row" key={exception.id}><span><strong>{exception.title}</strong><small>{exception.detail}</small></span><span className={`finance-state finance-state--${exception.tone}`}>Review required</span></div>)}</div> : <p className="finance-empty">No billing exceptions detected in the shared records.</p>
+          })()}
+        </section>
+        </div>
         {cancelTarget && <div className="finance-modal-backdrop" role="presentation"><section className="finance-cancel-modal" role="dialog" aria-modal="true" aria-labelledby="finance-cancel-title"><h3 id="finance-cancel-title">Record controlled cancellation / reversal</h3><p>The original finance record will remain in the register. Enter an audit reason; no record will be deleted.</p><label>Reason<textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} /></label><div><button type="button" className="button button--secondary" onClick={() => setCancelTarget(null)}>Keep record</button><button type="button" className="button button--primary" onClick={confirmCancellation}>Record cancellation</button></div></section></div>}
       </>
+    )
+  }
+
+  function InvoiceDetailsModal() {
+    if (!selectedInvoiceId) return null
+    const invoice = dataset.invoices.find((record) => record.id === selectedInvoiceId)
+    if (!invoice) {
+      return (
+        <div className="finance-modal-backdrop" role="presentation">
+          <section className="finance-invoice-modal" role="dialog" aria-modal="true" aria-labelledby="finance-invoice-missing-title">
+            <div className="finance-invoice-modal-heading"><div><span className="section-eyebrow">CUSTOMER BILLING</span><h3 id="finance-invoice-missing-title">Invoice unavailable</h3></div><button className="finance-modal-close" type="button" onClick={() => onOpenInvoice('')}>Close</button></div>
+            <p className="finance-empty">Invoice {selectedInvoiceId} is not present in the current shared finance records.</p>
+          </section>
+        </div>
+      )
+    }
+    const customer = dataset.customers.find((record) => record.id === invoice.customerId)
+    const job = dataset.jobs.find((record) => record.jobNo === invoice.jobNo)
+    const lines = invoice.chargeIds.map((chargeId) => dataset.charges.find((charge) => charge.id === chargeId)).filter(Boolean)
+    const totals = calculateInvoiceTotals(dataset, invoice.id)
+    const outstanding = invoice.status === 'cancelled' ? 0 : totals.outstandingRM
+    return (
+      <div className="finance-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onOpenInvoice('') }}>
+        <section className="finance-invoice-modal" role="dialog" aria-modal="true" aria-labelledby="finance-invoice-title">
+          <div className="finance-invoice-modal-heading">
+            <div><span className="section-eyebrow">CUSTOMER INVOICE</span><h3 id="finance-invoice-title">{invoice.id}</h3><span className="finance-invoice-modal-subtitle">{customer?.name ?? 'Customer not recorded'} · {job?.description ?? 'Job not recorded'}</span></div>
+            <button className="finance-modal-close" type="button" onClick={() => onOpenInvoice('')}>Close</button>
+          </div>
+          <div className="finance-invoice-overview">
+            <div><span>Status</span><strong className={`finance-state finance-state--${invoice.status}`}>{label(invoice.status)}</strong></div>
+            <div><span>Issue date</span><strong>{invoice.invoiceDate || 'Not recorded'}</strong></div>
+            <div><span>Due date</span><strong>{invoice.dueDate || 'Not recorded'}</strong></div>
+            <div><span>Linked Job</span><strong>{invoice.jobNo || 'Not recorded'}</strong></div>
+          </div>
+          <div className="finance-invoice-details-grid">
+            <section><h4>Customer details</h4><dl><div><dt>Name</dt><dd>{customer?.name ?? 'Not recorded'}</dd></div><div><dt>Customer code</dt><dd>{customer?.code ?? 'Not recorded'}</dd></div><div><dt>Location</dt><dd>{customer ? `${customer.city}, ${customer.country}` : 'Not recorded'}</dd></div></dl></section>
+            <section><h4>References</h4><dl><div><dt>Job No.</dt><dd>{invoice.jobNo || 'Not recorded'}</dd></div><div><dt>Shipment No.</dt><dd>{dataset.shipments.find((shipment) => shipment.jobNo === invoice.jobNo)?.id ?? 'Not recorded'}</dd></div><div><dt>Linked charges</dt><dd>{invoice.chargeIds.length}</dd></div></dl></section>
+          </div>
+          <section className="finance-invoice-lines"><h4>Line items</h4>{lines.length ? <div className="finance-invoice-line-table"><div className="finance-invoice-line-row finance-invoice-line-row--header"><span>Description</span><span>Qty / unit</span><span>Rate</span><span>Subtotal</span></div>{lines.map((charge) => charge && <div className="finance-invoice-line-row" key={charge.id}><span><strong>{charge.description}</strong><small>{label(charge.department)} · {charge.id}</small></span><span>{charge.quantity} {charge.unit}</span><span>{charge.quantity > 0 ? currency.format(charge.amountRM / charge.quantity) : 'Not recorded'}</span><strong>{currency.format(charge.amountRM)}</strong></div>)}</div> : <p className="finance-empty">No linked line items are recorded.</p>}</section>
+          <section className="finance-invoice-payment"><h4>Payment details</h4><dl><div><dt>Subtotal</dt><dd>{currency.format(totals.subtotalRM)}</dd></div><div><dt>Taxes / discounts</dt><dd>Not recorded</dd></div><div><dt>Amount paid</dt><dd>{currency.format(totals.paidRM)}</dd></div><div><dt>Outstanding balance</dt><dd>{currency.format(outstanding)}</dd></div><div><dt>Payment status</dt><dd>{invoice.status === 'paid' ? 'Paid' : totals.paidRM > 0 ? 'Partially paid' : 'Unpaid'}</dd></div></dl><p className="finance-invoice-note">Payment history is not separately recorded in the shared demo data.</p></section>
+          <div className="finance-invoice-modal-footer"><span>e-Invoice: {label(invoice.eInvoiceStatus)} · Email: {label(invoice.emailStatus)}</span><button className="button button--primary" type="button" onClick={() => onOpenInvoice('')}>Close</button></div>
+        </section>
+      </div>
     )
   }
 
@@ -394,7 +479,9 @@ function FinanceWorkspace({
             <button
               type="button"
               role="tab"
+              id={`finance-tab-${id}`}
               aria-selected={financeView === id}
+              aria-controls="finance-view-panel"
               className={financeView === id ? 'finance-view-tab finance-view-tab--active' : 'finance-view-tab'}
               key={id}
               onClick={() => onFinanceViewChange?.(id)}
@@ -404,7 +491,10 @@ function FinanceWorkspace({
           ))}
         </div>
       )}
-      {body()}
+      <div id="finance-view-panel" role="tabpanel" aria-labelledby={`finance-tab-${financeView}`} className="finance-view-panel">
+        {body()}
+      </div>
+      <InvoiceDetailsModal />
     </div>
   )
 

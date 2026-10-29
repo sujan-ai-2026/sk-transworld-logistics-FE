@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CUSTOMS_DECLARATION_TYPES,
   getCustomsRecords,
@@ -191,6 +191,7 @@ function CustomsCaseDetail({
   onUpdateMilestone: CustomsWorkspaceProps['onUpdateMilestone']
   onUpdateCustomsStep: CustomsWorkspaceProps['onUpdateCustomsStep']
 }) {
+  const [selectedStage, setSelectedStage] = useState<CustomsWorkflowStep | null>(null)
   const { customsCase, job, shipment, customerName, progress, documents } = record
   const customsEvents = dataset.milestones
     .filter((milestone) =>
@@ -202,6 +203,29 @@ function CustomsCaseDetail({
   const caseDocuments = documents.filter(
     (document) => !document.containerNo || document.containerNo === customsCase.containerNo,
   )
+  const selectedStageDefinition = workflowSteps.find(({ key }) => key === selectedStage)
+  const selectedStageValue = selectedStageDefinition ? stepStatus(customsCase, selectedStageDefinition.key) : null
+  const selectedStageEvidence = selectedStageDefinition
+    ? caseDocuments.find((document) => document.type === (selectedStageDefinition.documentType ?? customsCase.declarationType) && document.status === 'available')
+      ?? caseDocuments.find((document) => document.status === 'available')
+    : undefined
+  const selectedStageBlocker = selectedStageDefinition
+    ? getCustomsStepBlocker(customsCase, selectedStageDefinition.key, selectedStageDefinition.key === 'paymentStatus' ? 'paid' : 'complete')
+    : null
+
+  useEffect(() => {
+    if (!selectedStage) return
+    const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedStage(null)
+    }
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [selectedStage])
 
   return (
     <>
@@ -221,43 +245,55 @@ function CustomsCaseDetail({
         <CustomsFact label="Delivery lifecycle" value={`${label(customsCase.edoStatus)} EDO · ${label(customsCase.gatePassStatus)} gate pass`} />
       </div>
       <section className="logistics-subsection customs-workflow">
-        <div className="logistics-subsection-heading"><div><h4>Clearance chain</h4><small>Stage owner defaults to the Job owner; case date is the only customs timestamp recorded.</small></div><span>{progress.pendingSteps} open</span></div>
-        <ol className="customs-step-list">
-          {workflowSteps.map(({ key, label: stepLabel, documentType }, index) => {
+        <div className="logistics-subsection-heading"><div><h4>Clearance chain</h4><small>Stage owner defaults to the Job owner; case date is the only customs timestamp recorded.</small></div><span>{workflowSteps.filter(({ key }) => ['complete', 'paid', 'not_required'].includes(stepStatus(customsCase, key))).length} / {workflowSteps.length} complete</span></div>
+        <div className="customs-progress-summary" aria-label="Clearance progress">
+          <div className="customs-progress-summary__track"><span style={{ width: `${(workflowSteps.filter(({ key }) => ['complete', 'paid', 'not_required'].includes(stepStatus(customsCase, key))).length / workflowSteps.length) * 100}%` }} /></div>
+          <small>{progress.pendingSteps ? `${progress.pendingSteps} stage${progress.pendingSteps === 1 ? '' : 's'} remaining` : 'All required stages complete'}</small>
+        </div>
+        <ol className="customs-timeline">
+          {workflowSteps.map(({ key, label: stepLabel }, index) => {
             const value = stepStatus(customsCase, key)
-            const blocker = getCustomsStepBlocker(customsCase, key, key === 'paymentStatus' ? 'paid' : 'complete')
-            const evidence = caseDocuments.find((document) =>
-              document.type === (documentType ?? customsCase.declarationType) && document.status === 'available',
-            )
-            const hasRelevantDocument = evidence ?? caseDocuments.find((document) => document.status === 'available')
             const isNotRequired = value === 'not_required'
+            const isComplete = value === 'complete' || value === 'paid' || isNotRequired
+            const isDelayed = progress.overdue && !isComplete
             return (
-              <li className={`customs-step customs-step--${value}`} key={key}>
-                <span className="customs-step-index">{String(index + 1).padStart(2, '0')}</span>
-                <div className="customs-step-copy">
-                  <strong>{stepLabel}</strong>
-                  <span>{label(value)}</span>
-                  <small>Owner: {job.owner} · Case last updated {formatDate(customsCase.updatedAt)}</small>
-                  <small className={hasRelevantDocument ? 'customs-evidence customs-evidence--present' : 'customs-evidence'}>{hasRelevantDocument ? `Related document on Job No.: ${hasRelevantDocument.type} · ${hasRelevantDocument.fileName ?? 'filename not recorded'}${hasRelevantDocument.status !== 'available' ? ` · ${label(hasRelevantDocument.status)}` : ''}` : 'No related supporting document on file'}</small>
-                </div>
-                {!isNotRequired && (
-                  <label className="customs-step-control">
-                    Update
-                    <select aria-label={`Update ${stepLabel}`} onChange={(event) => onUpdateCustomsStep(customsCase.id, key, event.target.value as CustomsStepStatus | 'paid' | 'pending')} value={value}>
-                      {stepOptions(key).map((option) => {
-                        const optionBlocker = getCustomsStepBlocker(customsCase, key, option.value)
-                        return <option disabled={Boolean(optionBlocker)} key={option.value} title={optionBlocker ?? undefined} value={option.value}>{option.label}</option>
-                      })}
-                    </select>
-                    {blocker && value !== 'complete' && value !== 'paid' && <small className="customs-step-blocker">{blocker}</small>}
-                  </label>
-                )}
+              <li className={`customs-timeline__item customs-timeline__item--${isDelayed ? 'delayed' : value}${selectedStage === key ? ' customs-timeline__item--selected' : ''}`} key={key}>
+                <button className="customs-timeline__stage" type="button" onClick={() => setSelectedStage(selectedStage === key ? null : key)} aria-expanded={selectedStage === key}>
+                  <span className="customs-timeline__marker" aria-hidden="true">{isComplete ? '✓' : value === 'in_progress' ? '•' : isDelayed ? '!' : String(index + 1)}</span>
+                  <span className="customs-timeline__stage-copy"><strong>{stepLabel}</strong><small>{isDelayed ? 'Delayed' : label(value)}</small></span>
+                </button>
+                <div className="customs-timeline__connector" aria-hidden="true" />
               </li>
             )
           })}
         </ol>
         <p className="customs-document-disclaimer">Document upload or presence is record evidence only; it does not set declaration, approval, EDO or gate-pass status. Each status must be updated explicitly.</p>
       </section>
+      {selectedStageDefinition && selectedStageValue && (
+        <div className="customs-stage-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedStage(null) }}>
+          <section className="customs-stage-modal" role="dialog" aria-modal="true" aria-labelledby="customs-stage-modal-title">
+            <div className="customs-stage-modal__heading">
+              <div><span className="section-eyebrow">CLEARANCE STAGE</span><h3 id="customs-stage-modal-title">{selectedStageDefinition.label}</h3></div>
+              <button className="customs-stage-modal__close" type="button" onClick={() => setSelectedStage(null)}>Close</button>
+            </div>
+            <div className="customs-stage-modal__facts">
+              <div><span>Status</span><strong>{label(selectedStageValue)}</strong></div>
+              <div><span>Responsible</span><strong>{job.owner}</strong></div>
+              <div><span>Recorded date</span><strong>{formatDate(customsCase.updatedAt)}</strong></div>
+              <div><span>Document status</span><strong>{selectedStageEvidence ? `${selectedStageEvidence.type} · ${label(selectedStageEvidence.status)}` : 'No supporting document'}</strong></div>
+            </div>
+            <div className="customs-stage-modal__remarks"><span>Remarks / pending action</span><p>{selectedStageBlocker ?? (selectedStageEvidence ? `Evidence linked: ${selectedStageEvidence.fileName ?? 'filename not recorded'}.` : 'No remarks recorded for this stage.')}</p></div>
+            {selectedStageValue !== 'not_required' && <label className="customs-step-control">Update status
+              <select aria-label={`Update ${selectedStageDefinition.label}`} onChange={(event) => onUpdateCustomsStep(customsCase.id, selectedStageDefinition.key, event.target.value as CustomsStepStatus | 'paid' | 'pending')} value={selectedStageValue}>
+                {stepOptions(selectedStageDefinition.key).map((option) => {
+                  const optionBlocker = getCustomsStepBlocker(customsCase, selectedStageDefinition.key, option.value)
+                  return <option disabled={Boolean(optionBlocker)} key={option.value} title={optionBlocker ?? undefined} value={option.value}>{option.label}</option>
+                })}
+              </select>
+            </label>}
+          </section>
+        </div>
+      )}
 
       <section className="logistics-subsection">
         <div className="logistics-subsection-heading"><div><h4>Customs event history</h4><small>Milestones include source and supporting file where linked.</small></div><span>{customsEvents.length}</span></div>

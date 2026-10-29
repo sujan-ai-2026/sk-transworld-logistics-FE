@@ -44,12 +44,16 @@ body {
 
 body,
 button,
-input {
+input,
+select,
+textarea {
   font-family: inherit;
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font-size: inherit;
 }
 
@@ -59,9 +63,59 @@ button {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid rgba(55, 131, 255, 0.48);
   outline-offset: 3px;
+}
+
+select:not([multiple]) {
+  min-width: 0;
+  padding-right: 32px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%23718097' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6'/%3E%3C/svg%3E");
+  background-position: right 11px center;
+  background-repeat: no-repeat;
+  background-size: 12px 8px;
+  color: var(--text-strong);
+  cursor: pointer;
+  line-height: 1.2;
+  appearance: none;
+  -webkit-appearance: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+select:not([multiple]):hover:not(:disabled) {
+  border-color: #b6c8e0;
+  background-color: #fbfdff;
+}
+
+select:not([multiple]):focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(55, 131, 255, 0.13);
+  outline: none;
+}
+
+select:not([multiple]):disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+select:not([multiple]) option {
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--text-strong);
+}
+
+select:not([multiple]) option:checked {
+  background: #eaf2ff;
+  color: #1f67d5;
 }
 
 ::selection {

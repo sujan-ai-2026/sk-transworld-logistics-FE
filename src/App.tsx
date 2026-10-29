@@ -22,7 +22,7 @@ import MasterDataWorkspace from './components/MasterDataWorkspace.js'
 import { MainContentBackground } from './components/MainContentBackground.js'
 import { LogisticsAnimation } from './components/LogisticsAnimation.js'
 import { useConfirmation } from './components/useConfirmation.js'
-import type { ActivityEvent, BankTransaction, ChargeSuggestion, CustomsCase, CustomsStepStatus, CustomerInvoice, Department, DemoDataset, DocumentRecord, Job, OperationalAlert, OperationalMilestone, PaymentRequest, PaymentVoucher, StockMovement, SupplierCost, WarehouseActivity } from './data/model.js'
+import type { ActivityEvent, BankTransaction, ChargeSuggestion, CustomsCase, CustomsStepStatus, Customer, CustomerInvoice, Department, DemoDataset, DocumentRecord, Driver, Job, OperationalAlert, OperationalMilestone, PaymentRequest, PaymentVoucher, Quotation, StockMovement, Supplier, SupplierCost, WarehouseActivity } from './data/model.js'
 import './App.css'
 import truckIcons from './assets/simple-blue-delivery-truck-icon-vector-60918322-Photoroom.png'
 
@@ -254,6 +254,8 @@ function App() {
   const [selectedShipmentId, setSelectedShipmentId] = useState<string | null>(null)
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
   const [financeView, setFinanceView] = useState<FinanceView>('register')
+  const [addedQuotations, setAddedQuotations] = useState<Quotation[]>([])
+  const [quotationUpdates, setQuotationUpdates] = useState<Record<string, Quotation>>({})
   const [createdJobs, setCreatedJobs] = useState<Job[]>([])
   const [linkedQuotationJobs, setLinkedQuotationJobs] = useState<Record<string, string>>({})
   const [closedJobs, setClosedJobs] = useState<Record<string, { reason: string; approvedBy: string }>>({})
@@ -270,6 +272,9 @@ function App() {
   const [addedFinanceCharges, setAddedFinanceCharges] = useState<ChargeSuggestion[]>([])
   const [invoiceUpdates, setInvoiceUpdates] = useState<Record<string, CustomerInvoice>>({})
   const [addedInvoices, setAddedInvoices] = useState<CustomerInvoice[]>([])
+  const [addedCustomers, setAddedCustomers] = useState<Customer[]>([])
+  const [addedSuppliers, setAddedSuppliers] = useState<Supplier[]>([])
+  const [addedDrivers, setAddedDrivers] = useState<Driver[]>([])
   const [supplierCostUpdates, setSupplierCostUpdates] = useState<Record<string, SupplierCost>>({})
   const [paymentRequestUpdates, setPaymentRequestUpdates] = useState<Record<string, PaymentRequest>>({})
   const [paymentVoucherUpdates, setPaymentVoucherUpdates] = useState<Record<string, PaymentVoucher>>({})
@@ -286,6 +291,9 @@ function App() {
     () => ({
       ...DEMO_DATA,
       jobs: [...DEMO_DATA.jobs, ...createdJobs],
+      customers: [...DEMO_DATA.customers, ...addedCustomers],
+      suppliers: [...DEMO_DATA.suppliers, ...addedSuppliers],
+      drivers: [...DEMO_DATA.drivers, ...addedDrivers],
       documents: [...DEMO_DATA.documents, ...addedDocuments].map((document) => documentUpdates[document.id] ?? document),
       activity: [...DEMO_DATA.activity, ...documentActivity],
       milestones: DEMO_DATA.milestones.map((milestone) => milestoneUpdates[milestone.id] ?? milestone),
@@ -299,18 +307,24 @@ function App() {
       paymentVouchers: DEMO_DATA.paymentVouchers.map((voucher) => paymentVoucherUpdates[voucher.id] ?? voucher),
       bankTransactions: DEMO_DATA.bankTransactions.map((transaction) => bankTransactionUpdates[transaction.id] ?? transaction),
       alerts: DEMO_DATA.alerts.map((alert) => alertUpdates[alert.id] ?? alert),
-      quotations: DEMO_DATA.quotations.map((quotation) => ({
-        ...quotation,
-        ...(linkedQuotationJobs[quotation.id]
-          ? {
-            linkedJobNo: linkedQuotationJobs[quotation.id],
-            status: 'accepted' as const,
-          }
-          : {}),
-      })),
+      quotations: [...DEMO_DATA.quotations, ...addedQuotations].map((quotation) => {
+        const updated = quotationUpdates[quotation.id] ?? quotation
+        return {
+          ...updated,
+          ...(linkedQuotationJobs[updated.id]
+            ? {
+              linkedJobNo: linkedQuotationJobs[updated.id],
+              status: 'accepted' as const,
+            }
+            : {}),
+        }
+      }),
     }),
     [
       createdJobs,
+      addedCustomers,
+      addedSuppliers,
+      addedDrivers,
       addedDocuments,
       documentUpdates,
       documentActivity,
@@ -330,6 +344,8 @@ function App() {
       addedStockMovements,
       storageChargeUpdates,
       addedStorageCharges,
+      addedQuotations,
+      quotationUpdates,
     ],
   )
 
@@ -376,6 +392,14 @@ function App() {
     setSelectedInvoiceId(invoiceId)
     setFinanceView('register')
     navigateTo('billing')
+  }
+
+  function handleCreateQuotation(quotation: Quotation) {
+    setAddedQuotations((current) => [...current, quotation])
+  }
+
+  function handleUpdateQuotation(quotation: Quotation) {
+    setQuotationUpdates((current) => ({ ...current, [quotation.id]: quotation }))
   }
 
   function handleCreateJob(job: Job) {
@@ -650,18 +674,18 @@ function App() {
           </button>
         </div>
 
-        <div className="workspace-switcher">
+        {/* <div className="workspace-switcher">
           <span className="workspace-avatar">SK</span>
           <span className="workspace-copy">
             <span className="workspace-label">Workspace</span>
             <span className="workspace-name">Transworld Malaysia</span>
           </span>
           <Icon name="chevron" size={16} />
-        </div>
+        </div> */}
 
         <nav className="sidebar-nav" aria-label="Main navigation">
           {navigationGroups.map((group) => (
-            <div className="nav-group" key={group.label}>
+            <div className="nav-group mt-6" key={group.label}>
               <p className="nav-group-label">{group.label}</p>
               {group.items.map((item) => (
                 <button
@@ -860,7 +884,11 @@ function App() {
           {activePage === 'dashboard' ? (
             <DashboardHome onNavigate={navigateTo} onOpenJob={openJob} onOpenShipment={openShipment} />
           ) : activePage === 'quotations' ? (
-            <QuotationsWorkspace dataset={appDataset} />
+            <QuotationsWorkspace
+              dataset={appDataset}
+              onCreateQuotation={handleCreateQuotation}
+              onUpdateQuotation={handleUpdateQuotation}
+            />
           ) : activePage === 'jobs' ? (
             <JobsWorkspace
               dataset={appDataset}
@@ -942,6 +970,7 @@ function App() {
               onFinanceViewChange={setFinanceView}
               selectedInvoiceId={selectedInvoiceId ?? undefined}
               onOpenJob={openJob}
+              onOpenInvoice={openInvoice}
               onOpenShipment={openShipment}
               onAddCharge={handleAddFinanceCharge}
               onUpdateCharge={handleUpdateFinanceCharge}
@@ -953,7 +982,13 @@ function App() {
               onUpdateBankTransaction={handleUpdateBankTransaction}
             />
           ) : activePage === 'master-data' ? (
-            <MasterDataWorkspace dataset={appDataset} onNavigate={navigateTo} />
+            <MasterDataWorkspace
+              dataset={appDataset}
+              onNavigate={navigateTo}
+              onCreateCustomer={(customer) => setAddedCustomers((current) => [...current, customer])}
+              onCreateSupplier={(supplier) => setAddedSuppliers((current) => [...current, supplier])}
+              onCreateDriver={(driver) => setAddedDrivers((current) => [...current, driver])}
+            />
           ) : (
             <WorkspacePlaceholder item={activeItem} onNavigate={navigateTo} />
           )}

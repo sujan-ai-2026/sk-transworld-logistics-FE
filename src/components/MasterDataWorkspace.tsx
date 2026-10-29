@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import type { DemoDataset } from '../data/model.js'
+import { useMemo, useState, type FormEvent } from 'react'
+import type { Customer, DemoDataset, Driver, Supplier } from '../data/model.js'
 import { LogisticsAnimation } from './LogisticsAnimation.js'
 import './MasterDataWorkspace.css'
 
@@ -150,13 +150,20 @@ function getEntries(dataset: DemoDataset, section: MasterSectionId): MasterDataE
 function MasterDataWorkspace({
   dataset,
   onNavigate,
+  onCreateCustomer,
+  onCreateSupplier,
+  onCreateDriver,
 }: {
   dataset: DemoDataset
   onNavigate: (page: WorkspacePage) => void
+  onCreateCustomer: (customer: Customer) => void
+  onCreateSupplier: (supplier: Supplier) => void
+  onCreateDriver: (driver: Driver) => void
 }) {
   const [activeSection, setActiveSection] = useState<MasterSectionId>('customers')
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [isAddOpen, setIsAddOpen] = useState(false)
   const section = sections.find((item) => item.id === activeSection) ?? sections[0]
   const entries = useMemo(() => getEntries(dataset, activeSection), [dataset, activeSection])
   const statuses = [...new Set(entries.map((entry) => entry.status))]
@@ -187,12 +194,21 @@ function MasterDataWorkspace({
         <button
           className="button button--primary master-data-add"
           type="button"
-          disabled
-          title="Record creation is planned for the next implementation step."
+          onClick={() => setIsAddOpen(true)}
         >
           <span aria-hidden="true">+</span> {section.addLabel}
         </button>
       </section>
+      {isAddOpen && (
+        <MasterDataCreateModal
+          section={activeSection}
+          dataset={dataset}
+          onCancel={() => setIsAddOpen(false)}
+          onCreateCustomer={(customer) => { onCreateCustomer(customer); setIsAddOpen(false) }}
+          onCreateSupplier={(supplier) => { onCreateSupplier(supplier); setIsAddOpen(false) }}
+          onCreateDriver={(driver) => { onCreateDriver(driver); setIsAddOpen(false) }}
+        />
+      )}
 
       <section className="master-data-summary" aria-label="Master data overview">
         <article className="master-summary-card">
@@ -366,6 +382,71 @@ function MasterDataWorkspace({
         <span className="status-dot status-dot--amber" />
         Demo Data · Values are drawn from shared illustrative records. Add and edit actions are reserved for a later step.
       </p> */}
+    </div>
+  )
+}
+
+function MasterDataCreateModal({
+  section,
+  dataset,
+  onCancel,
+  onCreateCustomer,
+  onCreateSupplier,
+  onCreateDriver,
+}: {
+  section: MasterSectionId
+  dataset: DemoDataset
+  onCancel: () => void
+  onCreateCustomer: (customer: Customer) => void
+  onCreateSupplier: (supplier: Supplier) => void
+  onCreateDriver: (driver: Driver) => void
+}) {
+  const [name, setName] = useState('')
+  const [code, setCode] = useState('')
+  const [city, setCity] = useState('')
+  const [phone, setPhone] = useState('')
+  const [licenceClass, setLicenceClass] = useState('')
+  const [service, setService] = useState<Supplier['service']>(section === 'carriers' ? 'carrier' : 'haulage')
+  const [errors, setErrors] = useState<string[]>([])
+  const supported = section === 'customers' || section === 'suppliers' || section === 'carriers' || section === 'drivers'
+  const title = sections.find((item) => item.id === section)?.addLabel ?? 'Add record'
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const nextErrors: string[] = []
+    if (!name.trim()) nextErrors.push('Name is required')
+    if (section !== 'drivers' && !code.trim()) nextErrors.push('Code is required')
+    if (section === 'customers' && !city.trim()) nextErrors.push('City is required')
+    if (section === 'drivers' && !phone.trim()) nextErrors.push('Phone is required')
+    if (section === 'drivers' && !licenceClass.trim()) nextErrors.push('Licence class is required')
+    if (section === 'customers' && dataset.customers.some((customer) => customer.code.toLowerCase() === code.trim().toLowerCase())) nextErrors.push('Customer code already exists')
+    if ((section === 'suppliers' || section === 'carriers') && dataset.suppliers.some((supplier) => supplier.code.toLowerCase() === code.trim().toLowerCase())) nextErrors.push('Supplier code already exists')
+    setErrors(nextErrors)
+    if (nextErrors.length) return
+    const id = `MD-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+    if (section === 'customers') onCreateCustomer({ id, code: code.trim().toUpperCase(), name: name.trim(), city: city.trim(), country: 'Malaysia' })
+    else if (section === 'drivers') onCreateDriver({ id, name: name.trim(), phone: phone.trim(), licenceClass: licenceClass.trim(), status: 'available' })
+    else onCreateSupplier({ id, code: code.trim().toUpperCase(), name: name.trim(), service })
+  }
+
+  return (
+    <div className="master-data-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+      <section className="master-data-create-modal" role="dialog" aria-modal="true" aria-labelledby="master-data-create-title">
+        <div className="master-data-create-heading"><div><span className="section-eyebrow">MASTER DATA</span><h2 id="master-data-create-title">{title}</h2></div><button className="master-data-modal-close" type="button" onClick={onCancel}>Close</button></div>
+        {supported ? (
+          <form className="master-data-create-form" onSubmit={submit} noValidate>
+            <label><span>{section === 'drivers' ? 'Driver name' : section === 'customers' ? 'Customer name' : 'Supplier name'}</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Enter name" /></label>
+            {section !== 'drivers' && <label><span>Code</span><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. NEW-001" /></label>}
+            {section === 'customers' && <label><span>City</span><input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Enter city" /></label>}
+            {(section === 'suppliers' || section === 'carriers') && <label><span>Service type</span><select value={service} onChange={(event) => setService(event.target.value as Supplier['service'])}><option value="carrier">Carrier</option><option value="haulage">Haulage</option><option value="terminal">Terminal</option><option value="warehouse">Warehouse</option></select></label>}
+            {section === 'drivers' && <><label><span>Phone</span><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Enter phone number" /></label><label><span>Licence class</span><input value={licenceClass} onChange={(event) => setLicenceClass(event.target.value)} placeholder="e.g. GDL" /></label></>}
+            {errors.length > 0 && <ul className="master-data-form-errors" role="alert">{errors.map((error) => <li key={error}>{error}</li>)}</ul>}
+            <div className="master-data-create-actions"><button className="button button--secondary" type="button" onClick={onCancel}>Cancel</button><button className="button button--primary" type="submit">Save {title.replace('Add ', '')}</button></div>
+          </form>
+        ) : (
+          <div className="master-data-unavailable"><strong>Creation is not configured for {sections.find((item) => item.id === section)?.label}.</strong><p>{sections.find((item) => item.id === section)?.description} This prototype does not have a shared model or save handler for this configuration, so no record will be fabricated.</p><button className="button button--secondary" type="button" onClick={onCancel}>Close</button></div>
+        )}
+      </section>
     </div>
   )
 }
